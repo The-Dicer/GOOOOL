@@ -8,10 +8,6 @@ logger = logging.getLogger(__name__)
 
 
 async def prepare_graphics(context, match_data) -> str:
-    """
-    Автоматизирует создание и скачивание обложки на сайте AFL Graphics.
-    Возвращает абсолютный путь к скачанному файлу.
-    """
     logger.info("Ищем вкладку AFL Graphics...")
     graphics_page = None
 
@@ -38,9 +34,8 @@ async def prepare_graphics(context, match_data) -> str:
 
         logger.info(f"Ищем сезон: {target_tournament} [{current_year}]")
 
-        # Кликаем по иконке шеврона для выбора сезона (исправлено)
+        # Кликаем по иконке шеврона для выбора сезона
         logger.info("Кликаем по иконке шеврона для выбора сезона...")
-        # Ищем правую секцию (где иконка) у второго инпута (индекс 1)
         season_dropdown = graphics_page.locator(".mantine-Input-rightSection").nth(1)
         await season_dropdown.locator("svg").click()
 
@@ -71,9 +66,8 @@ async def prepare_graphics(context, match_data) -> str:
             logger.error(f"Доступные лиги: {available_leagues}")
             raise Exception(f"Турнир '{target_tournament}' не найден!")
 
-        # --- ИЗМЕНЕНИЕ ЗДЕСЬ: Выбираем последний (самый свежий) сезон ---
+        # --- Выбираем последний (самый свежий) сезон ---
         logger.info("Выбираем самый актуальный (последний) сезон из списка...")
-        # Берем все кнопки с годами внутри найденного блока турнира
         year_buttons = found_league.locator("div.IgrSeasonSelect_season__AUXMG")
 
         # Дожидаемся, чтобы они появились (на всякий случай)
@@ -99,11 +93,10 @@ async def prepare_graphics(context, match_data) -> str:
         logger.info("Турнир успешно выбран.")
         await graphics_page.wait_for_timeout(1000)
 
-        # --- 2. ВЫБОР Cover2 (Универсальный и надежный) ---
+        # --- 2. ВЫБОР Cover2 ---
         logger.info("Проверяем и выбираем тип графики (Cover2)...")
 
         # Находим все элементы, похожие на выпадающие списки (дропдауны)
-        # В Mantine они обычно имеют класс .mantine-Select-wrapper или .mantine-Input-wrapper
         # Мы знаем, что выбор типа графики - это 3-й по счету дропдаун на странице
         # (1-й - Лига, 2-й - Сезон, 3-й - Тип графики, 4-й - Выбор игры)
         cover_wrapper = graphics_page.locator(".mantine-Input-wrapper").nth(2)
@@ -134,7 +127,7 @@ async def prepare_graphics(context, match_data) -> str:
             await graphics_page.get_by_role("option", name="Cover2", exact=True).click(force=True)
             await graphics_page.wait_for_timeout(1000)
 
-        # --- 3. ВЫБОР ЦВЕТОВ ПО СТАДИОНУ (colors) ---
+        # --- 3. ВЫБОР ЦВЕТОВ ПО СТАДИОНУ ---
         logger.info(f"Выбираем цвета для стадиона: {match_data.stadium}...")
         await graphics_page.locator(".IgrSchemaSelect_container__lLhtL").click()
         await graphics_page.wait_for_timeout(500)
@@ -142,15 +135,15 @@ async def prepare_graphics(context, match_data) -> str:
         stadium_lower = match_data.stadium.lower()
         color_position = 3  # Дефолтная карточка, если стадион не найден. Да, да я с труда
 
-        # Маппинг: название стадиона -> номер позиции (nth-child)
+        # Название стадиона -> номер позиции (nth-child)
         if "труд" in stadium_lower:
-            color_position = 3  # Серый
+            color_position = 3
         elif "ясенево" in stadium_lower:
-            color_position = 9  # Оранжевый/Красный
+            color_position = 9
         elif "терехово" in stadium_lower:
             color_position = 8
         elif "конструктор" in stadium_lower or "дело спорта" in stadium_lower:
-            color_position = 1
+            color_position = 24
         elif "тушино" in stadium_lower or "октябрь" in stadium_lower:
             color_position = 4
 
@@ -165,7 +158,7 @@ async def prepare_graphics(context, match_data) -> str:
         await graphics_page.keyboard.press("Escape")
         await graphics_page.wait_for_timeout(1000)
 
-        # --- 4. ПОИСК И ВЫБОР ИГРЫ (С УМНЫМ ПОИСКОМ) ---
+        # --- 4. ПОИСК И ВЫБОР ИГРЫ ---
         logger.info(f"Ищем матч: {match_data.team_home} - {match_data.team_away}, {match_data.tour_number} round")
 
         game_input = graphics_page.get_by_role("searchbox", name="Select game")
@@ -180,7 +173,6 @@ async def prepare_graphics(context, match_data) -> str:
         safe_away = re.sub(r'\s+', ' ', match_data.team_away.replace('ТП', '').strip())
 
         # Создаем регулярное выражение, которое ищет обе команды, игнорируя лишние пробелы и переносы между ними
-        # Знак (?i) делает поиск нечувствительным к регистру
         search_pattern = re.compile(f"{re.escape(safe_home)}.*{re.escape(safe_away)}", re.IGNORECASE)
 
         # Ищем опцию по регулярному выражению, а не по точной строке

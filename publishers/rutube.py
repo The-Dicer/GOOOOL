@@ -102,8 +102,8 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
         # --- 6. СБОР ДАННЫХ СО СТРАНИЦЫ ПРЕДПРОСМОТРА ---
         logger.info("Ждем загрузки страницы предпросмотра...")
 
-        # Ждем появления кнопки "Поделиться"
-        share_btn = rutube_page.locator('button', has_text="Поделиться")
+        # Ждем появления кнопки "Поделиться" (ищем по уникальной иконке, чтобы работало на любых экранах)
+        share_btn = rutube_page.locator("button:has(svg use[*|href='#IconDsMainShare'])").first
         await share_btn.wait_for(state="visible", timeout=15000)
         await rutube_page.wait_for_timeout(1000)
 

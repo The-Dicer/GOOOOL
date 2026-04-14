@@ -29,9 +29,9 @@ async def get_all_weekend_matches(context) -> List[MatchMetadata]:
         # Получаем все карточки матчей на странице
         match_cards = await footballista_page.locator('a[href^="/admin/games/"]').all()
 
-        # Переменные для отслеживания смены выходных
-        seen_friday = False
-        seen_saturday = False
+        # Словарь для отслеживания уникальных дат по дням недели
+        # Формат: {"ВС": "12 АПР.", "СБ": "11 АПР."}
+        weekend_days_map = {}
 
         logger.info(f"Найдено {len(match_cards)} матчей на странице. Начинаем фильтрацию...")
 
@@ -40,16 +40,38 @@ async def get_all_weekend_matches(context) -> List[MatchMetadata]:
             date_raw = await card.locator('div.date').inner_text()
             date_raw = date_raw.strip().upper()
 
-            # Логика определения "прошлых выходных"
-            # Если мы уже прошли Пятницу или Субботу, и снова видим Воскресенье - значит начались прошлые выходные
-            if "(ПТ)" in date_raw:
-                seen_friday = True
-            elif "(СБ)" in date_raw:
-                seen_saturday = True
+            # Извлекаем дату до скобки (например, "12 АПР.")
+            date_str = date_raw.split('(')[0].strip()
 
-            if "(ВС)" in date_raw and (seen_friday or seen_saturday):
-                logger.info(f"Дошли до прошлых выходных ({date_raw}). Остановка сбора.")
-                break  # Прерываем цикл, дальше идут старые матчи
+            day_of_week = None
+            if "(ПТ)" in date_raw:
+                day_of_week = "ПТ"
+            elif "(СБ)" in date_raw:
+                day_of_week = "СБ"
+            elif "(ВС)" in date_raw:
+                day_of_week = "ВС"
+
+            # === НОВАЯ УМНАЯ ЛОГИКА ФИЛЬТРАЦИИ ПРОШЛЫХ ВЫХОДНЫХ ===
+            if day_of_week:
+                # 1. Порядок сбился: видим ВСК после Субботы/Пятницы, или СУБ после Пятницы
+                if day_of_week == "ВС" and ("СБ" in weekend_days_map or "ПТ" in weekend_days_map):
+                    logger.info(f"Дошли до прошлых выходных ({date_raw}). Остановка сбора.")
+                    break
+                if day_of_week == "СБ" and "ПТ" in weekend_days_map:
+                    logger.info(f"Дошли до прошлых выходных ({date_raw}). Остановка сбора.")
+                    break
+
+                # 2. Скачок во времени: день недели тот же, но дата другая (11 АПР. -> 4 АПР.)
+                if day_of_week in weekend_days_map and weekend_days_map[day_of_week] != date_str:
+                    logger.info(f"Обнаружен скачок в неделю ({date_raw}). Остановка сбора.")
+                    break
+
+                # Запоминаем текущую дату для этого дня недели
+                weekend_days_map[day_of_week] = date_str
+            else:
+                # Если встретили матч среди недели (СР, ЧТ), значит выходные кончились
+                logger.info(f"Встретили будний день ({date_raw}). Остановка сбора.")
+                break
 
             # Собираем данные матча (как раньше, но внутри цикла)
             champ = await card.locator('div.champ').inner_text()
