@@ -143,7 +143,7 @@ async def prepare_graphics(context, match_data) -> str:
         elif "терехово" in stadium_lower:
             color_position = 8
         elif "конструктор" in stadium_lower or "дело спорта" in stadium_lower:
-            color_position = 24
+            color_position = 19
         elif "тушино" in stadium_lower or "октябрь" in stadium_lower:
             color_position = 4
 
