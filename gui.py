@@ -54,7 +54,8 @@ def launch_chrome():
         ])
 
         logging.info("Изолированный Chrome запущен!")
-        logging.info("ВНИМАНИЕ: Авторизуйся в AFL Graphics, Rutube и Footballista в этом окне, затем жми 'Запуск'. Footballista открой на вкладке со всеми играми, а еще один раз хром попросит ДОСТУП К БУФЕРУ ОБМЕНА")
+        logging.info(
+            "ВНИМАНИЕ: Авторизуйся в AFL Graphics, Rutube и Footballista в этом окне, затем жми 'Запуск'. Footballista открой на вкладке со всеми играми, а еще один раз хром попросит ДОСТУП К БУФЕРУ ОБМЕНА")
     except Exception as e:
         logging.error(f"Не удалось запустить Chrome: {e}")
 
@@ -68,6 +69,14 @@ async def run_cancellable_pipeline():
         logging.info("Все задачи выполнены!")
     except asyncio.CancelledError:
         logging.warning("Процесс был принудительно остановлен пользователем! Повторный запуск начнет все с начала")
+    except Exception as e:
+        # НОВЫЙ БЛОК: ОБРАБОТКА СМЕРТИ БРАУЗЕРА
+        error_msg = str(e).lower()
+        if "target closed" in error_msg or "econnrefused" in error_msg:
+            logging.error("СВЯЗЬ С БРАУЗЕРОМ ПОТЕРЯНА! Похоже, вы закрыли Chrome. Либо вы Женя.")
+            logging.info("Нажмите '1. Жмыяк...' и запустите процесс заново.")
+        else:
+            logging.error(f"Непредвиденная ошибка оркестратора: {e}")
 
 
 def run_async_loop(btn_start, btn_stop):
@@ -86,7 +95,7 @@ def run_async_loop(btn_start, btn_stop):
         loop.close()
         # Восстанавливаем состояние кнопок
         btn_start.after(0, lambda: btn_start.config(state=tk.NORMAL,
-                                                    text="2. Запустить пайплайн (Сбор -> Графика -> Rutube)"))
+                                                    text="2. Погнали"))
         btn_stop.after(0, lambda: btn_stop.config(state=tk.DISABLED))
 
 
@@ -109,19 +118,24 @@ def stop_automation():
 
 def create_gui():
     root = tk.Tk()
-    root.title("AFL Publisher)")
+    root.title("AFL Publisher")
     root.geometry("850x650")
     root.configure(bg="#f0f0f0")
+
+    try:
+        root.iconbitmap("icon.ico")
+    except Exception:
+        pass
 
     lbl_title = tk.Label(root, text="Панель управления операторами AFL", font=("Arial", 16, "bold"), bg="#f0f0f0")
     lbl_title.pack(pady=10)
 
-    btn_chrome = tk.Button(root, text="1. Жмыяк(Открыть Chrome с портом 9222)",
+    btn_chrome = tk.Button(root, text="1. Жмыяк (Открыть Chrome с портом 9222)",
                            font=("Arial", 12), bg="#4CAF50", fg="white",
                            command=launch_chrome, width=50, height=2)
     btn_chrome.pack(pady=5)
 
-    # Фрейм для кнопок Старт и Стоп (чтобы они были рядом)
+    # Фрейм для кнопок Старт и Стоп
     frame_controls = tk.Frame(root, bg="#f0f0f0")
     frame_controls.pack(pady=10)
 

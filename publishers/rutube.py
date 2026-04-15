@@ -34,10 +34,13 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
             break
 
     if not rutube_page:
-        raise Exception("Открой вкладку Rutube Studio (https://studio.rutube.ru/streams) в браузере!")
-
-    logger.info("Вкладка Rutube найдена. Переключаемся...")
-    await rutube_page.bring_to_front()
+        logger.warning("Вкладка Rutube не найдена (возможно, была закрыта). Открываем новую...")
+        rutube_page = await context.new_page()
+        await rutube_page.goto("https://studio.rutube.ru/streams")
+        await rutube_page.wait_for_timeout(2000)
+    else:
+        logger.info("Вкладка Rutube найдена. Переключаемся...")
+        await rutube_page.bring_to_front()
 
     try:
         # 1. ПЕРЕХОД К СОЗДАНИЮ ТРАНСЛЯЦИИ

@@ -17,11 +17,14 @@ async def prepare_graphics(context, match_data) -> str:
             break
 
     if not graphics_page:
-        raise Exception("Открой вкладку AFL Graphics в браузере!")
+        logger.warning("Вкладка AFL Graphics не найдена. Открываем новую...")
+        graphics_page = await context.new_page()
+        await graphics_page.goto("https://afl-graphics.vercel.app/")
+        await graphics_page.wait_for_timeout(2000)
 
-    logger.info("Вкладка AFL Graphics найдена. Переключаемся...")
-    await graphics_page.bring_to_front()
-
+    else:
+        logger.info("Вкладка AFL Graphics найдена. Переключаемся...")
+        await graphics_page.bring_to_front()
     try:
         # 1. ВЫБОР СЕЗОНА И ТУРНИРА
         target_tournament = match_data.tournament_name
@@ -139,7 +142,7 @@ async def prepare_graphics(context, match_data) -> str:
         if "труд" in stadium_lower:
             color_position = 3
         elif "ясенево" in stadium_lower:
-            color_position = 9 # надеюсь с цветами угадал
+            color_position = 9  # надеюсь с цветами угадал
         elif "терехово" in stadium_lower:
             color_position = 8
         elif "конструктор" in stadium_lower or "дело спорта" in stadium_lower:
