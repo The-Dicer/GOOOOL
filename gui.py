@@ -15,7 +15,7 @@ pipeline_task = None
 
 
 class TextHandler(logging.Handler):
-    """Перехват логов для UI"""
+    # Перехват логов для UI
 
     def __init__(self, text_widget):
         super().__init__()
@@ -34,7 +34,7 @@ class TextHandler(logging.Handler):
 
 
 def launch_chrome():
-    """Открывает изолированный Chrome с портом 9222"""
+    # Открывает изолированный Chrome с портом 9222
     try:
         chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
         if not os.path.exists(chrome_path):
@@ -60,7 +60,7 @@ def launch_chrome():
 
 
 async def run_cancellable_pipeline():
-    """Асинхронная обертка, которую можно отменить"""
+    # Асинхронная обертка, которую можно отменить
     global pipeline_task
     pipeline_task = asyncio.create_task(run_pipeline())
     try:
@@ -71,7 +71,7 @@ async def run_cancellable_pipeline():
 
 
 def run_async_loop(btn_start, btn_stop):
-    """Запускает event loop в отдельном потоке"""
+    # Запускает event loop в отдельном потоке
     global stop_event
 
     loop = asyncio.new_event_loop()
@@ -91,7 +91,7 @@ def run_async_loop(btn_start, btn_stop):
 
 
 def start_automation(btn_start, btn_stop):
-    """Кнопка 'Старт'"""
+    # Кнопка 'Старт'
     btn_start.config(state=tk.DISABLED, text="Выполняется (Смотрите лог)...")
     btn_stop.config(state=tk.NORMAL)
 
@@ -99,7 +99,7 @@ def start_automation(btn_start, btn_stop):
 
 
 def stop_automation():
-    """Кнопка 'Стоп'"""
+    # Кнопка 'Стоп'
     global pipeline_task
     if pipeline_task and not pipeline_task.done():
         logging.info("Посылаем сигнал остановки... Ждем прерывания текущего шага.")

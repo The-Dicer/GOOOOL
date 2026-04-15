@@ -23,7 +23,7 @@ async def prepare_graphics(context, match_data) -> str:
     await graphics_page.bring_to_front()
 
     try:
-        # --- 1. ВЫБОР СЕЗОНА И ТУРНИРА ---
+        # 1. ВЫБОР СЕЗОНА И ТУРНИРА
         target_tournament = match_data.tournament_name
         current_year = str(datetime.datetime.now().year)
 
@@ -66,7 +66,7 @@ async def prepare_graphics(context, match_data) -> str:
             logger.error(f"Доступные лиги: {available_leagues}")
             raise Exception(f"Турнир '{target_tournament}' не найден!")
 
-        # --- Выбираем последний (самый свежий) сезон ---
+        # Выбираем последний (самый свежий, вкуснятина) сезон
         logger.info("Выбираем самый актуальный (последний) сезон из списка...")
         year_buttons = found_league.locator("div.IgrSeasonSelect_season__AUXMG")
 
@@ -93,7 +93,7 @@ async def prepare_graphics(context, match_data) -> str:
         logger.info("Турнир успешно выбран.")
         await graphics_page.wait_for_timeout(1000)
 
-        # --- 2. ВЫБОР Cover2 ---
+        # 2. ВЫБОР Cover2
         logger.info("Проверяем и выбираем тип графики (Cover2)...")
 
         # Находим все элементы, похожие на выпадающие списки (дропдауны)
@@ -127,7 +127,7 @@ async def prepare_graphics(context, match_data) -> str:
             await graphics_page.get_by_role("option", name="Cover2", exact=True).click(force=True)
             await graphics_page.wait_for_timeout(1000)
 
-        # --- 3. ВЫБОР ЦВЕТОВ ПО СТАДИОНУ ---
+        # 3. ВЫБОР ЦВЕТОВ ПО СТАДИОНУ
         logger.info(f"Выбираем цвета для стадиона: {match_data.stadium}...")
         await graphics_page.locator(".IgrSchemaSelect_container__lLhtL").click()
         await graphics_page.wait_for_timeout(500)
@@ -139,7 +139,7 @@ async def prepare_graphics(context, match_data) -> str:
         if "труд" in stadium_lower:
             color_position = 3
         elif "ясенево" in stadium_lower:
-            color_position = 9
+            color_position = 9 # надеюсь с цветами угадал
         elif "терехово" in stadium_lower:
             color_position = 8
         elif "конструктор" in stadium_lower or "дело спорта" in stadium_lower:
@@ -158,7 +158,7 @@ async def prepare_graphics(context, match_data) -> str:
         await graphics_page.keyboard.press("Escape")
         await graphics_page.wait_for_timeout(1000)
 
-        # --- 4. ПОИСК И ВЫБОР ИГРЫ ---
+        # 4. ПОИСК И ВЫБОР ИГРЫ
         logger.info(f"Ищем матч: {match_data.team_home} - {match_data.team_away}, {match_data.tour_number} round")
 
         game_input = graphics_page.get_by_role("searchbox", name="Select game")
@@ -197,7 +197,7 @@ async def prepare_graphics(context, match_data) -> str:
 
         await graphics_page.wait_for_timeout(1000)
 
-        # --- 5. СКАЧИВАНИЕ КАРТИНКИ ---
+        # 5. СКАЧИВАНИЕ КАРТИНКИ
         logger.info("Нажимаем 'DOWNLOAD IMAGE' и ждем файл...")
         download_dir = Path(os.getcwd()) / "covers"
         download_dir.mkdir(exist_ok=True)
@@ -225,7 +225,7 @@ async def prepare_graphics(context, match_data) -> str:
 
         logger.info("📸 Сохранен скриншот ошибки: test_cover.png")
 
-        # --- ДОБАВЛЕНО: Очистка интерфейса при ошибке ---
+        # Очистка интерфейса при ошибке
 
         try:
 

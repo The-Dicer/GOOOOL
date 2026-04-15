@@ -23,7 +23,7 @@ async def add_video_link_to_match(context, match_url: str, video_url: str) -> No
 
         # Нажимаем кнопку "добавить" в модальном окне
         # Ищем строго кнопку с текстом 'добавить' внутри блока .buttons-row.small
-        # Псевдокласс :text-is ищет строгое совпадение, а .first берет первую, чтобы избежать дублей
+        # Блять псевдокласс :text-is ищет строгое совпадение, а .first берет первую, чтобы избежать дублей
         add_btn = page.locator('button:text-is("добавить")').first
         await add_btn.click()
 

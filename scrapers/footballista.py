@@ -51,9 +51,9 @@ async def get_all_weekend_matches(context) -> List[MatchMetadata]:
             elif "(ВС)" in date_raw:
                 day_of_week = "ВС"
 
-            # === НОВАЯ УМНАЯ ЛОГИКА ФИЛЬТРАЦИИ ПРОШЛЫХ ВЫХОДНЫХ ===
+            # НОВАЯ УМНАЯ ЛОГИКА ФИЛЬТРАЦИИ ПРОШЛЫХ ВЫХОДНЫХ
             if day_of_week:
-                # 1. Порядок сбился: видим ВСК после Субботы/Пятницы, или СУБ после Пятницы
+                # 1. Порядок сбился: видим ВСК после Суб/Пят, или СУБ после Пят
                 if day_of_week == "ВС" and ("СБ" in weekend_days_map or "ПТ" in weekend_days_map):
                     logger.info(f"Дошли до прошлых выходных ({date_raw}). Остановка сбора.")
                     break
@@ -69,11 +69,11 @@ async def get_all_weekend_matches(context) -> List[MatchMetadata]:
                 # Запоминаем текущую дату для этого дня недели
                 weekend_days_map[day_of_week] = date_str
             else:
-                # Если встретили матч среди недели (СР, ЧТ), значит выходные кончились
+                # Если встретили матч среди недели (а вдруг), значит выходные кончились
                 logger.info(f"Встретили будний день ({date_raw}). Остановка сбора.")
                 break
 
-            # Собираем данные матча (как раньше, но внутри цикла)
+            # Собираем данные матча
             champ = await card.locator('div.champ').inner_text()
 
             try:
@@ -99,7 +99,7 @@ async def get_all_weekend_matches(context) -> List[MatchMetadata]:
                     logger.warning(f"Пропуск матча: не удалось разобрать команды ({full_text})")
                     continue
 
-            # ДОБАВИТЬ ЭТОТ БЛОК: Получаем ссылку на матч
+            # Получаем ссылку на матч
             href = await card.get_attribute("href")
             match_url = f"https://footballista.ru{href}"
 
@@ -110,7 +110,7 @@ async def get_all_weekend_matches(context) -> List[MatchMetadata]:
                 tour_number=tour_number,
                 match_date=date_raw,
                 stadium=stadium,
-                match_url=match_url  # ПЕРЕДАЕМ СЮДА
+                match_url=match_url
             )
 
             matches.append(match_data)

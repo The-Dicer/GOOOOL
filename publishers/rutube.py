@@ -22,7 +22,7 @@ Instagram* AFL – платформа запрещена на территори
 Iphone — https://apps.apple.com/ru/app/afl/id1555695558
 
 Android — https://play.google.com/store/apps/details?id=com.foo"""
-
+# бесит)
 
 async def publish_stream(context, match_data: MatchMetadata, cover_path: str) -> None:
     logger.info("Ищем вкладку Rutube Studio...")
@@ -40,7 +40,7 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
     await rutube_page.bring_to_front()
 
     try:
-        # --- 1. ПЕРЕХОД К СОЗДАНИЮ ТРАНСЛЯЦИИ ---
+        # 1. ПЕРЕХОД К СОЗДАНИЮ ТРАНСЛЯЦИИ
         if "streams" not in rutube_page.url:
             await rutube_page.goto("https://studio.rutube.ru/streams")
             await rutube_page.wait_for_timeout(2000)
@@ -50,18 +50,18 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
         await rutube_page.get_by_role("menuitem", name="Начать трансляцию").click()
         await rutube_page.wait_for_timeout(1500)
 
-        # --- 2. ЗАПОЛНЕНИЕ ОСНОВНЫХ ДАННЫХ ---
+        # 2. ЗАПОЛНЕНИЕ ОСНОВНЫХ ДАННЫХ
         logger.info(f"Вводим название: {match_data.stream_title}")
         title_input = rutube_page.get_by_role("textbox", name="Название")
         await title_input.click()
-        # Очищаем поле (как в codegen через Ctrl+A/Ctrl+M, но надежнее через fill)
+        # Очищаем поле
         await title_input.fill(match_data.stream_title)
 
         logger.info("Вводим описание...")
         desc_input = rutube_page.get_by_role("textbox", name="Описание")
         await desc_input.fill(AFL_DESCRIPTION)
 
-        # --- 3. ВЫБОР КАТЕГОРИИ ---
+        # 3. ВЫБОР КАТЕГОРИИ
         logger.info("Выбираем категорию 'Спорт'...")
         await rutube_page.get_by_text("Выберите категорию").click()
         await rutube_page.get_by_text("Спорт", exact=True).click()
@@ -73,7 +73,7 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
         # Ждем прогрузки следующего шага
         await rutube_page.wait_for_timeout(2000)
 
-        # --- 4. ЗАГРУЗКА ОБЛОЖКИ ---
+        # 4. ЗАГРУЗКА ОБЛОЖКИ
         logger.info(f"Загружаем обложку: {cover_path}")
 
         # Правильный паттерн Playwright для загрузки файлов через кнопку
@@ -89,7 +89,7 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
         await rutube_page.get_by_role("button", name="Готово").click()
         await rutube_page.wait_for_timeout(2000)
 
-        # --- 5. АВТОСТАРТ И СОХРАНЕНИЕ ---
+        # 5. АВТОСТАРТ И СОХРАНЕНИЕ
         logger.info("Включаем Автостарт...")
         autostart_checkbox = rutube_page.locator("div[class*='autoStart__checkbox']").first
         await autostart_checkbox.scroll_into_view_if_needed()
@@ -99,7 +99,7 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
         logger.info("Сохраняем трансляцию...")
         await rutube_page.get_by_role("button", name="Сохранить").click()
 
-        # --- 6. СБОР ДАННЫХ СО СТРАНИЦЫ ПРЕДПРОСМОТРА ---
+        # 6. СБОР ДАННЫХ СО СТРАНИЦЫ ПРЕДПРОСМОТРА
         logger.info("Ждем загрузки страницы предпросмотра...")
 
         # Ждем появления кнопки "Поделиться" (ищем по уникальной иконке, чтобы работало на любых экранах)
@@ -174,7 +174,7 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
                 except:
                     pass
 
-        # --- 7. СОХРАНЕНИЕ В TXT ФАЙЛ ---
+        # 7. СОХРАНЕНИЕ В TXT ФАЙЛ
         keys_file = "stream_keys.txt"
         with open(keys_file, "a", encoding="utf-8") as f:
             f.write(f"Матч: {match_data.stream_title}\n")
