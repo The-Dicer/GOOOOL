@@ -7,7 +7,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-async def prepare_graphics(context, match_data) -> str:
+async def prepare_graphics(context, match_data, pattern_mode="Автовыбор") -> str:
     logger.info("Ищем вкладку AFL Graphics...")
     graphics_page = None
 
@@ -132,11 +132,14 @@ async def prepare_graphics(context, match_data) -> str:
 
         # 3. ВЫБОР ЦВЕТОВ ПО СТАДИОНУ
         logger.info(f"Выбираем цвета для стадиона: {match_data.stadium}...")
+
+        # Открываем меню
         await graphics_page.locator(".IgrSchemaSelect_container__lLhtL").click()
         await graphics_page.wait_for_timeout(500)
 
         stadium_lower = match_data.stadium.lower()
-        color_position = 3  # Дефолтная карточка, если стадион не найден. Да, да я с труда
+        color_position = 3  # Дефолтная карточка цвета
+        pattern_position = 1
 
         # Название стадиона -> номер позиции (nth-child)
         if "труд" in stadium_lower:
@@ -158,11 +161,32 @@ async def prepare_graphics(context, match_data) -> str:
         elif "балашиха" in stadium_lower:
             color_position = 15
 
-        logger.info(f"Выбрана позиция цвета: {color_position}")
+        # --- Определение паттерна (Авто или Жесткий выбор из интерфейса) ---
+        if pattern_mode == "Паттерн 1":
+            pattern_position = 1
+        elif pattern_mode == "Паттерн 2":
+            pattern_position = 2
+        else:
+            # Режим "Автовыбор"
+            if "поле 2" in stadium_lower or "дальнее" in stadium_lower:
+                pattern_position = 2
+            else:
+                pattern_position = 1
 
-        # Выбор карточки цвета по ее индексу
+        logger.info(f"Выбрана позиция цвета: {color_position}, паттерн: {pattern_position}")
+
+        # Выбор карточки цвета
         await graphics_page.locator(f".mantine-Group-root > div:nth-child({color_position})").first.click()
         await graphics_page.wait_for_timeout(500)
+
+        # Выбор паттерна
+        if pattern_position != 1:
+            logger.info(f"Применяем Паттерн {pattern_position}...")
+            try:
+                await graphics_page.get_by_role("img").nth(pattern_position).click()
+                await graphics_page.wait_for_timeout(500)
+            except Exception as e:
+                logger.warning(f"Не удалось применить Паттерн {pattern_position}: {e}")
 
         # Закрываем меню с помощью клавиши Escape
         logger.info("Закрываем меню выбора цветов...")

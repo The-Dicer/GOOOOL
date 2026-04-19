@@ -18,6 +18,7 @@ pipeline_task = None
 fetched_matches = []
 checkbox_vars = []
 select_all_var = None
+pattern_var = None
 
 
 class TextHandler(logging.Handler):
@@ -102,9 +103,9 @@ def run_async_fetch(btn_fetch, btn_publish, scrollable_frame):
         btn_fetch.after(0, lambda: btn_fetch.configure(state=tk.NORMAL, text="2. Собрать расписание"))
 
 
-async def run_cancellable_publish(selected_matches):
+async def run_cancellable_publish(selected_matches, pattern_mode):
     global pipeline_task
-    pipeline_task = asyncio.create_task(process_selected_matches(selected_matches))
+    pipeline_task = asyncio.create_task(process_selected_matches(selected_matches, pattern_mode))
     try:
         await pipeline_task
     except asyncio.CancelledError:
@@ -117,11 +118,11 @@ async def run_cancellable_publish(selected_matches):
             logging.error(f"Критическая ошибка: {e}")
 
 
-def run_async_publish(selected_matches, btn_publish, btn_stop):
+def run_async_publish(selected_matches, btn_publish, btn_stop, pattern_mode):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        loop.run_until_complete(run_cancellable_publish(selected_matches))
+        loop.run_until_complete(run_cancellable_publish(selected_matches, pattern_mode))
     finally:
         loop.close()
         btn_publish.after(0, lambda: btn_publish.configure(state=tk.NORMAL, text="3. Опубликовать выбранные"))
@@ -146,6 +147,7 @@ def start_fetch(btn_fetch, btn_publish, scrollable_frame):
 
 def start_publish(btn_publish, btn_stop):
     selected_matches = [match for var, match in checkbox_vars if var.get()]
+    pattern_mode = pattern_var.get()  # <--- Добавляем эту строчку
 
     if not selected_matches:
         logging.warning("Вы не выбрали ни одного матча для публикации!")
@@ -153,7 +155,9 @@ def start_publish(btn_publish, btn_stop):
 
     btn_publish.configure(state=tk.DISABLED, text="Публикуем...")
     btn_stop.configure(state=tk.NORMAL)
-    threading.Thread(target=run_async_publish, args=(selected_matches, btn_publish, btn_stop), daemon=True).start()
+    # Передаем pattern_mode в args:
+    threading.Thread(target=run_async_publish, args=(selected_matches, btn_publish, btn_stop, pattern_mode),
+                     daemon=True).start()
 
 
 def stop_automation():
@@ -167,6 +171,7 @@ def stop_automation():
 
 def create_gui():
     global select_all_var
+    global pattern_var
 
     # Меняем tk.Tk() на ctk.CTk()
     app = ctk.CTk()
@@ -179,10 +184,11 @@ def create_gui():
         pass
 
     select_all_var = ctk.BooleanVar(value=True)
+    pattern_var = ctk.StringVar(value="Автовыбор")
 
     ctk.CTkLabel(app, text="Панель управления операторами AFL", font=("Arial", 20, "bold")).pack(pady=15)
 
-    ctk.CTkButton(app, text="1. Жмыяк (Открыть Chrome с портом 9222)", font=("Arial", 14),
+    ctk.CTkButton(app, text="1. Жмяк (Открыть Chrome с портом 9222)", font=("Arial", 14),
                   fg_color="#2E7D32", hover_color="#1B5E20", height=40, command=launch_chrome).pack(pady=5, fill="x",
                                                                                                     padx=20)
 
@@ -205,10 +211,16 @@ def create_gui():
     header_frame = ctk.CTkFrame(app, fg_color="transparent")
     header_frame.pack(fill=tk.X, padx=20, pady=(15, 5))
 
-
     cb_select_all = ctk.CTkCheckBox(header_frame, text="Выбрать все", font=("Arial", 14, "bold"),
                                     variable=select_all_var, command=toggle_all)
     cb_select_all.pack(side=tk.LEFT)
+
+    # --- Переключатель паттернов (прижат вправо) ---
+    pattern_segmented = ctk.CTkSegmentedButton(header_frame, variable=pattern_var,
+                                               values=["Автовыбор", "Паттерн 1", "Паттерн 2"])
+    pattern_segmented.pack(side=tk.RIGHT)
+
+    ctk.CTkLabel(header_frame, text="Паттерн:", font=("Arial", 14)).pack(side=tk.RIGHT, padx=(0, 10))
 
     # === ИДЕАЛЬНЫЙ СКРОЛЛИРУЕМЫЙ СПИСОК МАТЧЕЙ ===
     # В ctk скролл, колесико и ползунок работают из коробки
