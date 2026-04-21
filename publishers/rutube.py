@@ -22,6 +22,8 @@ Instagram* AFL – платформа запрещена на территори
 Iphone — https://apps.apple.com/ru/app/afl/id1555695558
 
 Android — https://play.google.com/store/apps/details?id=com.foo"""
+
+
 # бесит)
 
 async def publish_stream(context, match_data: MatchMetadata, cover_path: str) -> None:
@@ -184,6 +186,10 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
             f.write(f"URL видео: {video_url}\n")
             f.write(f"Сервер: {server_url}\n")
             f.write(f"Ключ: {stream_key}\n")
+            f.write(f"Лого хозяев: {match_data.logo_home}\n")
+            f.write(f"Лого гостей: {match_data.logo_away}\n")
+            f.write(f"Сокр. хозяев: {match_data.abbr_home}\n")
+            f.write(f"Сокр. гостей: {match_data.abbr_away}\n")
             f.write("-" * 50 + "\n")
 
         logger.info(f"💾 Данные успешно записаны в файл: {keys_file}")
