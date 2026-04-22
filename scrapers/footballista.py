@@ -2,7 +2,6 @@ import re
 import logging
 from typing import List, Dict
 from models import MatchMetadata
-from history import is_match_published
 
 logger = logging.getLogger(__name__)
 
@@ -199,10 +198,6 @@ async def get_all_weekend_matches(context) -> List[MatchMetadata]:
                 logo_home=logo_home_url,
                 logo_away=logo_away_url,
             )
-
-            if is_match_published(match_data.stream_title):
-                logger.info(f"⏭ Пропуск: {date_raw} (Уже публиковался ранее)")
-                continue
 
             matches.append(match_data)
             logger.info(f"Добавлен в очередь: {date_raw} | {match_data.stream_title} | {stadium}")
