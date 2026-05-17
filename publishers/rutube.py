@@ -78,14 +78,7 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
         # Ждем прогрузки следующего шага
         await rutube_page.wait_for_timeout(2000)
 
-        # 4. АВТОСТАРТ И СОХРАНЕНИЕ
-        logger.info("Включаем Автостарт...")
-        autostart_checkbox = rutube_page.locator("div[class*='autoStart__checkbox']").first
-        await autostart_checkbox.scroll_into_view_if_needed()
-        await autostart_checkbox.click()
-        await rutube_page.wait_for_timeout(500)
-
-        # 5. ЗАГРУЗКА ОБЛОЖКИ
+        # 4. ЗАГРУЗКА ОБЛОЖКИ (Теперь делаем это в первую очередь)
         logger.info(f"Загружаем обложку: {cover_path}")
 
         # Правильный паттерн Playwright для загрузки файлов через кнопку
@@ -99,10 +92,34 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
 
         # Подтверждаем загрузку картинки
         await rutube_page.get_by_role("button", name="Готово").click()
-        await rutube_page.wait_for_timeout(2000)
 
-        # logger.info("Сохраняем трансляцию...")
-        # await rutube_page.get_by_role("button", name="Сохранить").click()
+        # Даем Rutube время автоматически закрыть окно после загрузки обложки
+        logger.info("Ждем автоматического закрытия окна настроек...")
+        await rutube_page.wait_for_timeout(3000)
+
+        # 5. АВТОСТАРТ ЧЕРЕЗ РЕДАКТИРОВАНИЕ
+        logger.info("Открываем настройки трансляции ('Редактировать')...")
+        await rutube_page.get_by_role("button", name="Редактировать").click()
+        await rutube_page.wait_for_timeout(1500)
+
+        logger.info("Включаем Автоматический запуск...")
+        try:
+            # Используем надежный локатор по name, который обсуждали в прошлый раз
+            autostart_checkbox = rutube_page.locator("input[name='autoStart']")
+            await autostart_checkbox.click(force=True, timeout=3000)
+        except Exception:
+            # Запасной локатор на случай, если Rutube снова что-то поменяет
+            autostart_checkbox = rutube_page.locator("div[class*='autoStart__checkbox']").first
+            await autostart_checkbox.scroll_into_view_if_needed()
+            await autostart_checkbox.click(force=True)
+
+        await rutube_page.wait_for_timeout(500)
+
+        logger.info("Сохраняем изменения трансляции...")
+        await rutube_page.get_by_role("button", name="Сохранить").click()
+
+        # Ждем, чтобы окно закрылось и интерфейс прогрузился перед сбором ссылок
+        await rutube_page.wait_for_timeout(2000)
 
         # 6. СБОР ДАННЫХ СО СТРАНИЦЫ ПРЕДПРОСМОТРА
         logger.info("Ждем загрузки страницы предпросмотра...")
