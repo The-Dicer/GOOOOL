@@ -20,9 +20,9 @@ async def fetch_matches_for_ui():
         return matches
 
 
-async def process_selected_matches(selected_matches, pattern_mode="Автовыбор", test_mode=True):
+async def process_selected_matches(selected_matches, pattern_mode="Автовыбор", test_mode=True, league="AFL Moscow 8x8"):
     state_msg = "ВКЛЮЧЕН" if test_mode else "ВЫКЛЮЧЕН"
-    logger.info(f"=== Запуск публикации | Тестовый режим: {state_msg} ===")
+    logger.info(f"=== Запуск публикации | Тестовый режим: {state_msg} | Лига: {league} ===")
 
     keys_file = "stream_keys.txt"
     with open(keys_file, "w", encoding="utf-8") as f:
@@ -36,7 +36,7 @@ async def process_selected_matches(selected_matches, pattern_mode="Автовы�
         for i, match in enumerate(selected_matches, 1):
             logger.info(f"--- Обработка [{i}/{len(selected_matches)}]: {match.stream_title} ---")
             try:
-                cover_path = await prepare_graphics(context, match, pattern_mode)
+                cover_path = await prepare_graphics(context, match, pattern_mode, league)
 
                 video_url = await publish_stream(context, match, cover_path)
 

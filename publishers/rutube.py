@@ -93,9 +93,22 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
         # Подтверждаем загрузку картинки
         await rutube_page.get_by_role("button", name="Готово").click()
 
-        # Даем Rutube время автоматически закрыть окно после загрузки обложки
-        logger.info("Ждем автоматического закрытия окна настроек...")
-        await rutube_page.wait_for_timeout(3000)
+        await rutube_page.wait_for_timeout(2000)
+
+        # УМНОЕ СОХРАНЕНИЕ: Нажимаем "Сохранить", если окно не закрылось само
+        logger.info("Проверяем кнопку 'Сохранить'...")
+        try:
+            save_btn = rutube_page.get_by_role("button", name="Сохранить")
+            # Ждем до 3 секунд. Если кнопка есть на экране — жмем её
+            if await save_btn.is_visible(timeout=3000):
+                await save_btn.click()
+                logger.info("✅ Трансляция сохранена (окно закрыто скриптом).")
+            else:
+                logger.info("Окно закрылось автоматически, идем дальше.")
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка при поиске кнопки 'Сохранить' (скорее всего окно уже закрыто). Идем дальше.")
+
+        await rutube_page.wait_for_timeout(2000)
 
         # 5. АВТОСТАРТ ЧЕРЕЗ РЕДАКТИРОВАНИЕ
         logger.info("Открываем настройки трансляции ('Редактировать')...")

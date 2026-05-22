@@ -69,6 +69,8 @@ class AFLPublisherApp(ctk.CTk):
         self.pattern_var = ctk.StringVar(value="Автовыбор")
         self.select_all_var = ctk.BooleanVar(value=True)
 
+        self.league_var = ctk.StringVar(value="AFL Moscow 8x8")
+
         self.last_browser_state = None
 
         self.build_ui()
@@ -101,6 +103,10 @@ class AFLPublisherApp(ctk.CTk):
         ctk.CTkSegmentedButton(self.sidebar, variable=self.pattern_var, values=["Автовыбор", "1", "2"]).pack(pady=5,
                                                                                                              padx=20,
                                                                                                              fill="x")
+
+        ctk.CTkLabel(self.sidebar, text="Лига:").pack(anchor="w", padx=20, pady=(10, 0))
+        ctk.CTkSegmentedButton(self.sidebar, variable=self.league_var,
+                               values=["AFL Moscow 8x8", "AFL Balashikha 8x8"]).pack(pady=5, padx=20, fill="x")
 
         self.switch_test = ctk.CTkSwitch(self.sidebar, text="Тестовый режим\n(без footballista)",
                                          variable=self.test_mode_var, onvalue=True, offvalue=False)
@@ -227,13 +233,15 @@ class AFLPublisherApp(ctk.CTk):
 
         mode = self.pattern_var.get()
         test = self.test_mode_var.get()
-        threading.Thread(target=self._run_async_publish, args=(selected, mode, test), daemon=True).start()
+        league = self.league_var.get()
 
-    def _run_async_publish(self, selected_matches, pattern_mode, test_mode):
+        threading.Thread(target=self._run_async_publish, args=(selected, mode, test, league), daemon=True).start()
+
+    def _run_async_publish(self, selected_matches, pattern_mode, test_mode, league):
         global pipeline_task
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        pipeline_task = loop.create_task(process_selected_matches(selected_matches, pattern_mode, test_mode))
+        pipeline_task = loop.create_task(process_selected_matches(selected_matches, pattern_mode, test_mode, league))
 
         try:
             loop.run_until_complete(pipeline_task)

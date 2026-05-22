@@ -7,7 +7,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-async def prepare_graphics(context, match_data, pattern_mode="Автовыбор") -> str:
+async def prepare_graphics(context, match_data, pattern_mode="Автовыбор", league="AFL Moscow 8x8") -> str:
     logger.info("Ищем вкладку AFL Graphics...")
     graphics_page = None
 
@@ -29,10 +29,9 @@ async def prepare_graphics(context, match_data, pattern_mode="Автовыбор
         # 1. ВЫБОР СЕЗОНА И ТУРНИРА
         target_tournament = match_data.tournament_name
         current_year = str(datetime.datetime.now().year)
-
-        logger.info("Настраиваем лигу (Moscow 8x8)...")
+        logger.info(f"Настраиваем лигу ({league})...")
         await graphics_page.get_by_role("searchbox", name="Select league").click()
-        await graphics_page.get_by_role("option", name="AFL Moscow 8x8").click()
+        await graphics_page.get_by_role("option", name=league).click()
         await graphics_page.wait_for_timeout(1000)
 
         logger.info(f"Ищем сезон: {target_tournament} [{current_year}]")

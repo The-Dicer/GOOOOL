@@ -13,10 +13,13 @@ async def enrich_matches_from_compact_view(context, matches: List[MatchMetadata]
         await compact_page.set_viewport_size({"width": 400, "height": 900})
         await compact_page.goto("https://footballista.ru/admin/games")
 
-        # ИСПРАВЛЕНИЕ 1: Ждем остановки сетевых запросов (сайт полностью скачал данные)
-        await compact_page.wait_for_load_state("networkidle", timeout=15000)
+        # ИСПРАВЛЕНИЕ 1: Ждем просто загрузки основного HTML, игнорируя фоновый мусор
+        await compact_page.wait_for_load_state("domcontentloaded")
 
-        # ИСПРАВЛЕНИЕ 2: Защита от гонки. Ждем, пока в DOM появится хотя бы больше одной карточки
+        # ИСПРАВЛЕНИЕ 2: Ждем, пока появится хотя бы одна карточка (таймаут 15 сек)
+        await compact_page.wait_for_selector('a[href^="/admin/games/"]', state="visible", timeout=15000)
+
+        # Защита от гонки. Ждем, пока в DOM появится больше одной карточки
         try:
             await compact_page.wait_for_function(
                 'document.querySelectorAll("a[href^=\'/admin/games/\']").length > 1',
