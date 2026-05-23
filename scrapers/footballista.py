@@ -120,16 +120,28 @@ async def get_all_weekend_matches(context) -> List[MatchMetadata]:
             date_raw = (await card.locator('div.date').inner_text()).strip().upper()
             date_str = date_raw.split('(')[0].strip()
 
-            day_of_week = "ПТ" if "(ПТ)" in date_raw else "СБ" if "(СБ)" in date_raw else "ВС" if "(ВС)" in date_raw else None
+            # --- НОВАЯ ЛОГИКА С ВЕСАМИ ДНЕЙ НЕДЕЛИ ---
+            day_values = {"СР": 1, "ЧТ": 2, "ПТ": 3, "СБ": 4, "ВС": 5, "ПН": 6, "ВТ": 7}
+            
+            match_day = re.search(r'\((ПН|ВТ|СР|ЧТ|ПТ|СБ|ВС)\)', date_raw)
+            day_of_week = match_day.group(1) if match_day else None
 
-            if day_of_week:
-                if (day_of_week == "ВС" and ("СБ" in weekend_days_map or "ПТ" in weekend_days_map)) or \
-                        (day_of_week == "СБ" and "ПТ" in weekend_days_map) or \
-                        (day_of_week in weekend_days_map and weekend_days_map[day_of_week] != date_str):
+            if day_of_week and day_of_week in day_values:
+                current_value = day_values[day_of_week]
+
+                # Условие 1: Мы уже видели этот день недели, но дата другая (прошлая неделя)
+                if day_of_week in weekend_days_map and weekend_days_map[day_of_week] != date_str:
                     break
+
+                # Условие 2: Переход на прошлую неделю (вес дня увеличился)
+                min_seen = min([day_values[d] for d in weekend_days_map.keys()]) if weekend_days_map else 99
+                if current_value > min_seen:
+                    break
+
                 weekend_days_map[day_of_week] = date_str
             else:
-                break
+                break # Если дата вообще без дня недели (нечитаемая), останавливаемся
+            # -----------------------------------------
 
             champ = await card.locator('div.champ').inner_text()
             try:
