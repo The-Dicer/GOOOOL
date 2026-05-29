@@ -1,5 +1,6 @@
 import re
 import logging
+import datetime
 from typing import List, Dict
 from models import MatchMetadata
 
@@ -114,22 +115,44 @@ async def get_all_weekend_matches(context) -> List[MatchMetadata]:
     try:
         await footballista_page.wait_for_selector('a[href^="/admin/games/"]', state="visible", timeout=10000)
         match_cards = await footballista_page.locator('a[href^="/admin/games/"]').all()
-        weekend_days_map = {}
+        # Берем текущую дату на компьютере
+        today = datetime.datetime.now().date()
+        current_year = today.year
+
+        month_map = {
+            "ЯНВ": 1, "ФЕВ": 2, "МАР": 3, "АПР": 4, "МАЯ": 5, "МАЙ": 5,
+            "ИЮН": 6, "ИЮЛ": 7, "АВГ": 8, "СЕН": 9, "ОКТ": 10, "НОЯ": 11, "ДЕК": 12
+        }
 
         for card in match_cards:
             date_raw = (await card.locator('div.date').inner_text()).strip().upper()
-            date_str = date_raw.split('(')[0].strip()
+            date_str = date_raw.split('(')[0].replace('.', '').strip()
 
-            day_of_week = "ПТ" if "(ПТ)" in date_raw else "СБ" if "(СБ)" in date_raw else "ВС" if "(ВС)" in date_raw else None
+            # --- НОВАЯ ЛОГИКА: ПРИВЯЗКА К СЕГОДНЯШНЕЙ ДАТЕ ---
+            try:
+                parts = date_str.split()
+                if len(parts) >= 2:
+                    d_num = int(parts[0])
+                    m_str = parts[1][:3] # Берем первые 3 буквы (МАЯ -> МАЯ, АПР -> АПР)
+                    m_num = month_map.get(m_str, today.month)
 
-            if day_of_week:
-                if (day_of_week == "ВС" and ("СБ" in weekend_days_map or "ПТ" in weekend_days_map)) or \
-                        (day_of_week == "СБ" and "ПТ" in weekend_days_map) or \
-                        (day_of_week in weekend_days_map and weekend_days_map[day_of_week] != date_str):
-                    break
-                weekend_days_map[day_of_week] = date_str
-            else:
-                break
+                    match_date_obj = datetime.date(current_year, m_num, d_num)
+
+                    # Защита от смены года (если собираем расписание в конце декабря на январь)
+                    if match_date_obj < today - datetime.timedelta(days=180):
+                        match_date_obj = match_date_obj.replace(year=current_year + 1)
+                    elif match_date_obj > today + datetime.timedelta(days=180):
+                        match_date_obj = match_date_obj.replace(year=current_year - 1)
+
+                    # ГЛАВНОЕ ПРАВИЛО: Если дата матча СТРОГО МЕНЬШЕ сегодняшней — останавливаемся
+                    if match_date_obj < today:
+                        logger.info(f"Матч {date_raw} уже прошел. Останавливаем сбор.")
+                        break
+
+            except Exception as e:
+                logger.warning(f"Не удалось распознать дату матча: {date_raw}. Игнорируем.")
+                pass 
+            # ---------------------------------------------------
 
             champ = await card.locator('div.champ').inner_text()
             try:

@@ -7,7 +7,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-async def prepare_graphics(context, match_data, pattern_mode="Автовыбор", league="AFL Moscow 8x8") -> str:
+async def prepare_graphics(context, match_data, pattern_mode="Автовыбор", league="AFL Moscow 8x8",
+                           default_color: int = 3) -> str:
     logger.info("Ищем вкладку AFL Graphics...")
     graphics_page = None
 
@@ -129,6 +130,10 @@ async def prepare_graphics(context, match_data, pattern_mode="Автовыбор
             await graphics_page.get_by_role("option", name="Cover2", exact=True).click(force=True)
             await graphics_page.wait_for_timeout(1000)
 
+        # ==========================================
+        # ВНИМАНИЕ: Сдвинули блок влево на один Tab!
+        # ==========================================
+
         # 3. ВЫБОР ЦВЕТОВ ПО СТАДИОНУ
         logger.info(f"Выбираем цвета для стадиона: {match_data.stadium}...")
 
@@ -137,7 +142,9 @@ async def prepare_graphics(context, match_data, pattern_mode="Автовыбор
         await graphics_page.wait_for_timeout(500)
 
         stadium_lower = match_data.stadium.lower()
-        color_position = 3  # Дефолтная карточка цвета
+
+        # СЮДА ПРИЛЕТАЕТ ЦВЕТ ИЗ ИНТЕРФЕЙСА (вместо жесткой 3)
+        color_position = default_color
         pattern_position = 1
 
         # Название стадиона -> номер позиции (nth-child)
@@ -157,6 +164,8 @@ async def prepare_graphics(context, match_data, pattern_mode="Автовыбор
             color_position = 22
         elif "олимпийская" in stadium_lower:
             color_position = 9
+        elif "красносельская" in stadium_lower:
+            color_position = 11
         elif "балашиха" in stadium_lower:
             color_position = 15
 

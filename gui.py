@@ -70,6 +70,7 @@ class AFLPublisherApp(ctk.CTk):
         self.select_all_var = ctk.BooleanVar(value=True)
 
         self.league_var = ctk.StringVar(value="AFL Moscow 8x8")
+        self.default_color_var = ctk.StringVar(value="3")  # По умолчанию ставим 3
 
         self.last_browser_state = None
 
@@ -106,7 +107,13 @@ class AFLPublisherApp(ctk.CTk):
 
         ctk.CTkLabel(self.sidebar, text="Лига:").pack(anchor="w", padx=20, pady=(10, 0))
         ctk.CTkSegmentedButton(self.sidebar, variable=self.league_var,
-                               values=["AFL Moscow 8x8", "AFL Balashikha 8x8"]).pack(pady=5, padx=20, fill="x")
+                               values=["AFL Moscow 8x8", "AFL Balashikha 8x8", "Just League Moscow 11x11"]).pack(pady=5, padx=20, fill="x")
+
+        # === НОВЫЙ БЛОК ВЫБОРА ЦВЕТА ===
+        ctk.CTkLabel(self.sidebar, text="Цвет по умолчанию (номер):").pack(anchor="w", padx=20, pady=(10, 0))
+        self.entry_color = ctk.CTkEntry(self.sidebar, textvariable=self.default_color_var)
+        self.entry_color.pack(pady=5, padx=20, fill="x")
+        # ===============================
 
         self.switch_test = ctk.CTkSwitch(self.sidebar, text="Тестовый режим\n(без footballista)",
                                          variable=self.test_mode_var, onvalue=True, offvalue=False)
@@ -200,22 +207,27 @@ class AFLPublisherApp(ctk.CTk):
         if not matches: return
 
         for match in matches:
+            # Создаем основную карточку
             card = ctk.CTkFrame(self.scroll_matches, fg_color="#2B2B2B", corner_radius=8)
             card.pack(fill="x", pady=4, padx=5)
 
+            # ОПТИМИЗАЦИЯ: Настраиваем сетку прямо на карточке
+            # Колонка 0 (для чекбокса) будет узкой, колонка 1 (для текста) заберет всё свободное место (weight=1)
+            card.grid_columnconfigure(1, weight=1)
+
+            # Чекбокс (размещаем в левой колонке, растягиваем на две строки вниз)
             var = ctk.BooleanVar(value=True)
             cb = ctk.CTkCheckBox(card, text="", variable=var, width=20)
-            cb.pack(side="left", padx=10)
+            cb.grid(row=0, column=0, rowspan=2, padx=10, pady=10, sticky="w")
 
-            info_frame = ctk.CTkFrame(card, fg_color="transparent")
-            info_frame.pack(side="left", fill="x", expand=True, padx=5, pady=5)
+            # Заголовок матча (размещаем в правой колонке, верхняя строка)
+            lbl_title = ctk.CTkLabel(card, text=match.stream_title, font=("Arial", 14, "bold"), anchor="w")
+            lbl_title.grid(row=0, column=1, padx=(0, 10), pady=(5, 0), sticky="ew")
 
-            lbl_title = ctk.CTkLabel(info_frame, text=match.stream_title, font=("Arial", 14, "bold"), anchor="w")
-            lbl_title.pack(fill="x")
-
-            lbl_sub = ctk.CTkLabel(info_frame, text=f"{match.match_date} | Тур {match.tour_number} | {match.stadium}",
+            # Подзаголовок матча (правая колонка, нижняя строка)
+            lbl_sub = ctk.CTkLabel(card, text=f"{match.match_date} | Тур {match.tour_number} | {match.stadium}",
                                    text_color="gray", anchor="w")
-            lbl_sub.pack(fill="x")
+            lbl_sub.grid(row=1, column=1, padx=(0, 10), pady=(0, 5), sticky="ew")
 
             checkbox_vars.append((var, match, card))
 
@@ -235,13 +247,21 @@ class AFLPublisherApp(ctk.CTk):
         test = self.test_mode_var.get()
         league = self.league_var.get()
 
-        threading.Thread(target=self._run_async_publish, args=(selected, mode, test, league), daemon=True).start()
+        # Считываем цвет и защищаемся от дурака (если ввели текст)
+        try:
+            default_color = int(self.default_color_var.get())
+        except ValueError:
+            default_color = 3
 
-    def _run_async_publish(self, selected_matches, pattern_mode, test_mode, league):
+        threading.Thread(target=self._run_async_publish, args=(selected, mode, test, league, default_color),
+                         daemon=True).start()
+
+    def _run_async_publish(self, selected_matches, pattern_mode, test_mode, league, default_color):
         global pipeline_task
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        pipeline_task = loop.create_task(process_selected_matches(selected_matches, pattern_mode, test_mode, league))
+        pipeline_task = loop.create_task(
+            process_selected_matches(selected_matches, pattern_mode, test_mode, league, default_color))
 
         try:
             loop.run_until_complete(pipeline_task)
