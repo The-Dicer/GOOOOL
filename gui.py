@@ -146,8 +146,40 @@ class AFLPublisherApp(ctk.CTk):
                                              command=self.toggle_all_matches)
         self.cb_select_all.pack(side="left", padx=5)
 
-        self.scroll_matches = ctk.CTkScrollableFrame(self.main_content, label_text="Матчи")
-        self.scroll_matches.grid(row=1, column=0, sticky="nsew", pady=(10, 20))
+        # --- БЫСТРЫЙ СПИСОК МАТЧЕЙ ЧЕРЕЗ CANVAS ---
+        # 1. Основной контейнер с рамкой и заголовком
+        self.matches_container = ctk.CTkFrame(self.main_content)
+        self.matches_container.grid(row=1, column=0, sticky="nsew", pady=(10, 20))
+        self.matches_container.grid_rowconfigure(1, weight=1)
+        self.matches_container.grid_columnconfigure(0, weight=1)
+
+        # Заголовок
+        lbl_matches_title = ctk.CTkLabel(self.matches_container, text="Матчи", font=("Arial", 14, "bold"))
+        lbl_matches_title.grid(row=0, column=0, columnspan=2, pady=5, sticky="w", padx=10)
+
+        # 2. Canvas для быстрого скроллинга
+        self.canvas = tk.Canvas(self.matches_container, bg="#2B2B2B", highlightthickness=0)
+        self.canvas.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=(0, 10))
+
+        # 3. Скроллбар
+        self.scrollbar = tk.Scrollbar(self.matches_container, orient="vertical", command=self.canvas.yview)
+        self.scrollbar.grid(row=1, column=1, sticky="ns", pady=(0, 10), padx=(0, 10))
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        # 4. Фрейм внутри Canvas, куда будут добавляться карточки
+        self.scroll_matches = ctk.CTkFrame(self.canvas, fg_color="#2B2B2B")
+        # Создаем окно внутри Canvas, которое будет содержать наш фрейм
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.scroll_matches, anchor="nw")
+
+        # Привязываем события для изменения размера и скроллинга мышью
+        self.scroll_matches.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfig(self.canvas_window, width=e.width))
+        
+        # Привязка колесика мыши (работает для Windows/Mac/Linux)
+        def _on_mousewheel(event):
+            self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        # ------------------------------------------
 
         ctk.CTkLabel(self.main_content, text="Лог работы:", font=("Arial", 12, "bold")).grid(row=2, column=0,
                                                                                              sticky="w")
@@ -207,24 +239,19 @@ class AFLPublisherApp(ctk.CTk):
         if not matches: return
 
         for match in matches:
-            # Создаем основную карточку
-            card = ctk.CTkFrame(self.scroll_matches, fg_color="#2B2B2B", corner_radius=8)
+            # Карточка теперь имеет цвет, чуть отличающийся от фона Canvas, чтобы выделяться
+            card = ctk.CTkFrame(self.scroll_matches, fg_color="#333333", corner_radius=8)
             card.pack(fill="x", pady=4, padx=5)
 
-            # ОПТИМИЗАЦИЯ: Настраиваем сетку прямо на карточке
-            # Колонка 0 (для чекбокса) будет узкой, колонка 1 (для текста) заберет всё свободное место (weight=1)
             card.grid_columnconfigure(1, weight=1)
 
-            # Чекбокс (размещаем в левой колонке, растягиваем на две строки вниз)
             var = ctk.BooleanVar(value=True)
             cb = ctk.CTkCheckBox(card, text="", variable=var, width=20)
             cb.grid(row=0, column=0, rowspan=2, padx=10, pady=10, sticky="w")
 
-            # Заголовок матча (размещаем в правой колонке, верхняя строка)
             lbl_title = ctk.CTkLabel(card, text=match.stream_title, font=("Arial", 14, "bold"), anchor="w")
             lbl_title.grid(row=0, column=1, padx=(0, 10), pady=(5, 0), sticky="ew")
 
-            # Подзаголовок матча (правая колонка, нижняя строка)
             lbl_sub = ctk.CTkLabel(card, text=f"{match.match_date} | Тур {match.tour_number} | {match.stadium}",
                                    text_color="gray", anchor="w")
             lbl_sub.grid(row=1, column=1, padx=(0, 10), pady=(0, 5), sticky="ew")
