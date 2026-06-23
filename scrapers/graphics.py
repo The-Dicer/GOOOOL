@@ -247,3 +247,4 @@ async def prepare_graphics(context, match_data, pattern_mode="Автовыбор
             pass
 
         raise e
+# пидорас

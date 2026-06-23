@@ -24,7 +24,7 @@ async def process_selected_matches(selected_matches, pattern_mode="Автовы�
                                    default_color=3, desc_text="", stadium_colors=None):
     if stadium_colors is None:
         stadium_colors = {}
-
+    #пасдлвы
     state_msg = "ВКЛЮЧЕН" if test_mode else "ВЫКЛЮЧЕН"
     logger.info(
         f"=== Запуск публикации | Тест: {state_msg} | Лига: {league} | Дефолтный цвет: {default_color} ===")

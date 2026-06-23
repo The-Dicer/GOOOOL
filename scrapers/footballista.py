@@ -146,7 +146,7 @@ async def get_all_weekend_matches(context, debug_30_matches=False) -> List[Match
                             match_date_obj = match_date_obj.replace(year=current_year + 1)
                         elif match_date_obj > today + datetime.timedelta(days=180):
                             match_date_obj = match_date_obj.replace(year=current_year - 1)
-
+                        # pashalka
                         if match_date_obj < today:
                             logger.info(f"Матч {date_raw} уже прошел. Останавливаем сбор.")
                             break

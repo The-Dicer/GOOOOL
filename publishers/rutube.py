@@ -25,7 +25,7 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str, de
         await rutube_page.bring_to_front()
 
     try:
-        # 1. ПЕРЕХОД К СОЗДАНИЮ ТРАНСЛЯЦИИ
+        # 1. ПЕРЕХОД К СОЗДАНИЮ ТРАНСЛЯЦИИ pashalka
         if "streams" not in rutube_page.url:
             await rutube_page.goto("https://studio.rutube.ru/streams")
             await rutube_page.wait_for_timeout(2000)

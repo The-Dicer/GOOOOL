@@ -79,7 +79,7 @@ class AFLPublisherApp(ctk.CTk):
         self.load_config()
         self.build_ui()
         self.check_browser_status()
-
+# pasha
     def load_config(self):
         default_desc = "Заявляйся в AFL!\n\n+7 (915) 296-80-45\nhttps://vk.com/s.lebedev24\n\nТелеграм AFL — https://t.me/aflrussiа\n\nAFL VK – https://vk.com/aflmoscow"
 
