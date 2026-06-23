@@ -17,5 +17,5 @@
 6. Следите за логами
 
 ЗЫ. Нужно иметь скачанный Chrome 
-<img width="225" height="225" alt="image" src="https://github.com/user-attachments/assets/0067d2a2-ae65-4306-940b-2f72842818ba" />
 
+<img width="225" height="225" alt="image" src="https://github.com/user-attachments/assets/0067d2a2-ae65-4306-940b-2f72842818ba" />
