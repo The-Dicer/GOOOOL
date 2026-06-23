@@ -102,7 +102,7 @@ async def enrich_matches_from_compact_view(context, matches: List[MatchMetadata]
         await compact_page.close()
 
 
-async def get_all_weekend_matches(context) -> List[MatchMetadata]:
+async def get_all_weekend_matches(context, debug_30_matches=False) -> List[MatchMetadata]:
     logger.info("Ищем вкладку Footballista...")
     footballista_page = next((p for p in context.pages if "footballista.ru" in p.url), None)
 
@@ -115,7 +115,6 @@ async def get_all_weekend_matches(context) -> List[MatchMetadata]:
     try:
         await footballista_page.wait_for_selector('a[href^="/admin/games/"]', state="visible", timeout=10000)
         match_cards = await footballista_page.locator('a[href^="/admin/games/"]').all()
-        # Берем текущую дату на компьютере
         today = datetime.datetime.now().date()
         current_year = today.year
 
@@ -128,33 +127,37 @@ async def get_all_weekend_matches(context) -> List[MatchMetadata]:
             date_raw = (await card.locator('div.date').inner_text()).strip().upper()
             date_str = date_raw.split('(')[0].replace('.', '').strip()
 
-            # --- НОВАЯ ЛОГИКА: ПРИВЯЗКА К СЕГОДНЯШНЕЙ ДАТЕ ---
-            try:
-                parts = date_str.split()
-                if len(parts) >= 2:
-                    d_num = int(parts[0])
-                    m_str = parts[1][:3] # Берем первые 3 буквы (МАЯ -> МАЯ, АПР -> АПР)
-                    m_num = month_map.get(m_str, today.month)
+            # --- ЛОГИКА ДЕБАГА ИЛИ ПРИВЯЗКА К ДАТЕ ---
+            if debug_30_matches:
+                if len(matches) >= 30:
+                    logger.info("Дебаг режим: собрано 30 матчей. Остановка.")
+                    break
+            else:
+                try:
+                    parts = date_str.split()
+                    if len(parts) >= 2:
+                        d_num = int(parts[0])
+                        m_str = parts[1][:3]
+                        m_num = month_map.get(m_str, today.month)
 
-                    match_date_obj = datetime.date(current_year, m_num, d_num)
+                        match_date_obj = datetime.date(current_year, m_num, d_num)
 
-                    # Защита от смены года (если собираем расписание в конце декабря на январь)
-                    if match_date_obj < today - datetime.timedelta(days=180):
-                        match_date_obj = match_date_obj.replace(year=current_year + 1)
-                    elif match_date_obj > today + datetime.timedelta(days=180):
-                        match_date_obj = match_date_obj.replace(year=current_year - 1)
+                        if match_date_obj < today - datetime.timedelta(days=180):
+                            match_date_obj = match_date_obj.replace(year=current_year + 1)
+                        elif match_date_obj > today + datetime.timedelta(days=180):
+                            match_date_obj = match_date_obj.replace(year=current_year - 1)
 
-                    # ГЛАВНОЕ ПРАВИЛО: Если дата матча СТРОГО МЕНЬШЕ сегодняшней — останавливаемся
-                    if match_date_obj < today:
-                        logger.info(f"Матч {date_raw} уже прошел. Останавливаем сбор.")
-                        break
+                        if match_date_obj < today:
+                            logger.info(f"Матч {date_raw} уже прошел. Останавливаем сбор.")
+                            break
 
-            except Exception as e:
-                logger.warning(f"Не удалось распознать дату матча: {date_raw}. Игнорируем.")
-                pass 
-            # ---------------------------------------------------
+                except Exception as e:
+                    logger.warning(f"Не удалось распознать дату матча: {date_raw}. Игнорируем.")
+                    pass
+                    # -----------------------------------------
 
             champ = await card.locator('div.champ').inner_text()
+            # ... дальше идет старый код парсинга champ, stadium, tour_number и т.д.
             try:
                 stadium = (await card.locator("xpath=..").locator('.stadium').first.inner_text(timeout=1000)).strip()
             except:

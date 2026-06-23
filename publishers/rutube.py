@@ -5,28 +5,8 @@ from models import MatchMetadata
 
 logger = logging.getLogger(__name__)
 
-# Шаблон описания трансляции
-AFL_DESCRIPTION = """Заявляйся в AFL!
 
-+7 (915) 296-80-45
-https://vk.com/s.lebedev24
-
-Телеграм AFL — https://t.me/aflrussiа
-
-AFL VK – https://vk.com/aflmoscow
-
-Instagram* AFL – платформа запрещена на территории РФ https://instagram.com/afl_russia
-
-Приложение AFL:
-
-Iphone — https://apps.apple.com/ru/app/afl/id1555695558
-
-Android — https://play.google.com/store/apps/details?id=com.foo"""
-
-
-# бесит)
-
-async def publish_stream(context, match_data: MatchMetadata, cover_path: str) -> None:
+async def publish_stream(context, match_data: MatchMetadata, cover_path: str, description_text: str) -> str:
     logger.info("Ищем вкладку Rutube Studio...")
     rutube_page = None
 
@@ -50,8 +30,20 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
             await rutube_page.goto("https://studio.rutube.ru/streams")
             await rutube_page.wait_for_timeout(2000)
 
-        logger.info("Нажимаем 'Добавить' -> 'Начать трансляцию'...")
-        await rutube_page.get_by_role("button", name="Добавить").click()
+        logger.info("Нажимаем 'Добавить' (или '+') -> 'Начать трансляцию'...")
+        try:
+            # Универсальный локатор: ищем кнопку, внутри которой есть уникальная SVG-иконка плюса
+            add_btn = rutube_page.locator("button:has(svg use[*|href='#IconDsMainPlus'])").first
+            await add_btn.wait_for(state="visible", timeout=5000)
+            await add_btn.click()
+        except Exception as e:
+            logger.warning(f"Не удалось найти кнопку по иконке, пробуем по тексту... ({e})")
+            # Резервный вариант
+            await rutube_page.get_by_role("button", name="Добавить", exact=True).click()
+
+        await rutube_page.wait_for_timeout(1000)
+
+        # Кликаем по выпадающему меню
         await rutube_page.get_by_role("menuitem", name="Начать трансляцию").click()
         await rutube_page.wait_for_timeout(1500)
 
@@ -59,12 +51,11 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
         logger.info(f"Вводим название: {match_data.stream_title}")
         title_input = rutube_page.get_by_role("textbox", name="Название")
         await title_input.click()
-        # Очищаем поле
         await title_input.fill(match_data.stream_title)
 
-        logger.info("Вводим описание...")
+        logger.info("Вводим описание из конфигурационного файла...")
         desc_input = rutube_page.get_by_role("textbox", name="Описание")
-        await desc_input.fill(AFL_DESCRIPTION)
+        await desc_input.fill(description_text)
 
         # 3. ВЫБОР КАТЕГОРИИ
         logger.info("Выбираем категорию 'Спорт'...")
@@ -74,39 +65,42 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
 
         logger.info("Нажимаем 'Сохранить и продолжить'...")
         await rutube_page.get_by_role("button", name="Сохранить и продолжить").click()
-
-        # Ждем прогрузки следующего шага
         await rutube_page.wait_for_timeout(2000)
 
-        # 4. ЗАГРУЗКА ОБЛОЖКИ (Теперь делаем это в первую очередь)
+        # 4. ЗАГРУЗКА ОБЛОЖКИ
         logger.info(f"Загружаем обложку: {cover_path}")
-
-        # Правильный паттерн Playwright для загрузки файлов через кнопку
         async with rutube_page.expect_file_chooser() as fc_info:
             await rutube_page.get_by_role("button", name="Изменить").click()
 
         file_chooser = await fc_info.value
         await file_chooser.set_files(cover_path)
+        await rutube_page.wait_for_timeout(1500)  # Даем чуть больше времени на чтение файла
 
-        await rutube_page.wait_for_timeout(1000)
+        logger.info("Нажимаем 'Готово' и страхуемся от зависания Rutube...")
+        try:
+            await rutube_page.get_by_role("button", name="Готово").click(timeout=5000)
+            await rutube_page.wait_for_timeout(3000)
 
-        # Подтверждаем загрузку картинки
-        await rutube_page.get_by_role("button", name="Готово").click()
+            # Если кнопка "Готово" всё еще торчит на экране, значит модалка зависла
+            if await rutube_page.get_by_role("button", name="Готово").is_visible():
+                logger.warning("Rutube бесконечно грузит превью. Сбрасываем окно через Escape...")
+                await rutube_page.keyboard.press("Escape")
+                await rutube_page.wait_for_timeout(1000)
+        except Exception as e:
+            logger.warning(f"Окно обложки повело себя нестандартно. Жмем Escape... ({e})")
+            await rutube_page.keyboard.press("Escape")
+            await rutube_page.wait_for_timeout(1000)
 
-        await rutube_page.wait_for_timeout(2000)
-
-        # УМНОЕ СОХРАНЕНИЕ: Нажимаем "Сохранить", если окно не закрылось само
         logger.info("Проверяем кнопку 'Сохранить'...")
         try:
             save_btn = rutube_page.get_by_role("button", name="Сохранить")
-            # Ждем до 3 секунд. Если кнопка есть на экране — жмем её
             if await save_btn.is_visible(timeout=3000):
                 await save_btn.click()
-                logger.info("✅ Трансляция сохранена (окно закрыто скриптом).")
+                logger.info("Трансляция сохранена.")
             else:
                 logger.info("Окно закрылось автоматически, идем дальше.")
-        except Exception as e:
-            logger.warning(f"⚠️ Ошибка при поиске кнопки 'Сохранить' (скорее всего окно уже закрыто). Идем дальше.")
+        except Exception:
+            logger.warning("Ошибка при поиске кнопки 'Сохранить'. Идем дальше.")
 
         await rutube_page.wait_for_timeout(2000)
 
@@ -117,11 +111,9 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
 
         logger.info("Включаем Автоматический запуск...")
         try:
-            # Используем надежный локатор по name, который обсуждали в прошлый раз
             autostart_checkbox = rutube_page.locator("input[name='autoStart']")
             await autostart_checkbox.click(force=True, timeout=3000)
         except Exception:
-            # Запасной локатор на случай, если Rutube снова что-то поменяет
             autostart_checkbox = rutube_page.locator("div[class*='autoStart__checkbox']").first
             await autostart_checkbox.scroll_into_view_if_needed()
             await autostart_checkbox.click(force=True)
@@ -130,14 +122,10 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
 
         logger.info("Сохраняем изменения трансляции...")
         await rutube_page.get_by_role("button", name="Сохранить").click()
-
-        # Ждем, чтобы окно закрылось и интерфейс прогрузился перед сбором ссылок
         await rutube_page.wait_for_timeout(2000)
 
         # 6. СБОР ДАННЫХ СО СТРАНИЦЫ ПРЕДПРОСМОТРА
         logger.info("Ждем загрузки страницы предпросмотра...")
-
-        # Ждем появления кнопки "Поделиться" (ищем по уникальной иконке, чтобы работало на любых экранах)
         share_btn = rutube_page.locator("button:has(svg use[*|href='#IconDsMainShare'])").first
         await share_btn.wait_for(state="visible", timeout=15000)
         await rutube_page.wait_for_timeout(1000)
@@ -150,19 +138,16 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
         server_url = ""
         stream_key = ""
 
-        # 6.1 Ищем ссылку на видео внутри открытого попапа
         popup = rutube_page.locator("div[role='dialog']")
         await popup.wait_for(state="visible", timeout=5000)
 
-        # Инпут со ссылкой лежит в блоке с меткой "Ссылка" (как видно в дампе)
         popup_input = popup.locator("input").first
         if await popup_input.count() > 0:
             val = await popup_input.input_value()
             if val and "rutube.ru/video/" in val:
                 video_url = val
-                logger.info(f"🔗 Ссылка на видео найдена: {video_url}")
+                logger.info(f"Ссылка на видео найдена: {video_url}")
 
-        # Закрываем модалку через специальную кнопку крестика (надежнее, чем Escape)
         logger.info("Закрываем окно 'Поделиться'...")
         close_popup_btn = rutube_page.locator("button[aria-label='Close Popup']")
         if await close_popup_btn.count() > 0:
@@ -171,9 +156,7 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
             await rutube_page.keyboard.press("Escape")
         await rutube_page.wait_for_timeout(1000)
 
-        # 6.2 Получаем Server URL и Stream Key с основной страницы
         logger.info("Собираем ключи трансляции...")
-        # Умный поиск: пробегаемся по всем полям ввода на странице
         all_inputs = await rutube_page.locator("input").all()
         for inp in all_inputs:
             try:
@@ -187,7 +170,6 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
             except:
                 pass
 
-        # Запасной план для ключей (через кнопки копирования)
         if not server_url or not stream_key:
             copy_buttons = rutube_page.locator("button:has(svg use[*|href='#IconDsMainCopy'])")
             if await copy_buttons.count() >= 2:
@@ -209,7 +191,6 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
                 except:
                     pass
 
-        # 7. СОХРАНЕНИЕ В TXT ФАЙЛ
         keys_file = "stream_keys.txt"
         with open(keys_file, "a", encoding="utf-8") as f:
             f.write(f"Матч: {match_data.stream_title}\n")
@@ -222,21 +203,16 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str) ->
             f.write(f"Сокр. гостей: {match_data.abbr_away}\n")
             f.write("-" * 50 + "\n")
 
-        logger.info(f"💾 Данные успешно записаны в файл: {keys_file}")
-
-        # Возвращаемся к списку трансляций
+        logger.info(f"Данные успешно записаны в файл: {keys_file}")
         await rutube_page.goto("https://studio.rutube.ru/streams")
         await rutube_page.wait_for_timeout(2000)
 
         return video_url
 
     except Exception as e:
-
         logger.error(f"Ошибка при публикации на Rutube: {e}", exc_info=True)
         await rutube_page.screenshot(path="rutube_error_screenshot.png")
-        logger.info("📸 Сохранен скриншот ошибки: rutube_error_screenshot.png")
-
-        # Пытаемся вернуться на главную страницу студии при ошибке
+        logger.info("Сохранен скриншот ошибки: rutube_error_screenshot.png")
         try:
             await rutube_page.goto("https://studio.rutube.ru/streams")
         except:
