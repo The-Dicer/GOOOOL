@@ -163,7 +163,18 @@ async def get_all_weekend_matches(context, debug_30_matches=False) -> List[Match
             except:
                 stadium = "Неизвестно"
 
-            tour_number = int(re.search(r'\d+', await card.locator('div.round').inner_text()).group())
+            # --- УМНОЕ ИЗВЛЕЧЕНИЕ НОМЕРА ТУРА ИЛИ СТАДИИ ---
+            raw_round_text = await card.locator('div.round').inner_text()
+            raw_round_text = raw_round_text.strip()
+
+            # Если это обычный тур (есть слово "тур" или только цифры) - достаем число
+            if "тур" in raw_round_text.lower() or raw_round_text.isdigit():
+                round_match = re.search(r'\d+', raw_round_text)
+                tour_number = round_match.group() if round_match else raw_round_text
+            else:
+                # Если это плей-офф ("Финал", "Semifinal", "1/2 финала") - берем текст целиком
+                tour_number = raw_round_text
+            # -----------------------------------------------
 
             img_count = await card.locator('img').count()
             if img_count >= 2:

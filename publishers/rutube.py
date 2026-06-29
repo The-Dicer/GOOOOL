@@ -6,7 +6,7 @@ from models import MatchMetadata
 logger = logging.getLogger(__name__)
 
 
-async def publish_stream(context, match_data: MatchMetadata, cover_path: str, description_text: str) -> str:
+async def publish_stream(context, match_data: MatchMetadata, cover_path: str, description_text: str, keys_file: str) -> str:
     logger.info("Ищем вкладку Rutube Studio...")
     rutube_page = None
 
@@ -67,40 +67,69 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str, de
         await rutube_page.get_by_role("button", name="Сохранить и продолжить").click()
         await rutube_page.wait_for_timeout(2000)
 
-        # 4. ЗАГРУЗКА ОБЛОЖКИ
-        logger.info(f"Загружаем обложку: {cover_path}")
-        async with rutube_page.expect_file_chooser() as fc_info:
-            await rutube_page.get_by_role("button", name="Изменить").click()
+        # 4. ЗАГРУЗКА ОБЛОЖКИ (ВНУТРЕННИЙ ЦИКЛ С ПЕРЕЗАГРУЗКОЙ)
+        cover_max_retries = 3
+        cover_uploaded = False
 
-        file_chooser = await fc_info.value
-        await file_chooser.set_files(cover_path)
-        await rutube_page.wait_for_timeout(1500)  # Даем чуть больше времени на чтение файла
+        for cover_attempt in range(1, cover_max_retries + 1):
+            logger.info(f"Загружаем обложку (Попытка {cover_attempt}/{cover_max_retries}): {cover_path}")
 
-        logger.info("Нажимаем 'Готово' и страхуемся от зависания Rutube...")
-        try:
-            await rutube_page.get_by_role("button", name="Готово").click(timeout=5000)
-            await rutube_page.wait_for_timeout(3000)
+            try:
+                # Если это 2-я или 3-я попытка, сбрасываем баги и заходим в редактирование заново
+                if cover_attempt > 1:
+                    logger.info("Перезагружаем страницу для сброса зависшего состояния...")
+                    await rutube_page.reload()
+                    await rutube_page.wait_for_timeout(5000)  # Ждем прогрузки страницы
 
-            # Если кнопка "Готово" всё еще торчит на экране, значит модалка зависла
-            if await rutube_page.get_by_role("button", name="Готово").is_visible():
-                logger.warning("Rutube бесконечно грузит превью. Сбрасываем окно через Escape...")
+                    logger.info("Нажимаем 'Редактировать' для повторной загрузки обложки...")
+                    await rutube_page.get_by_role("button", name="Редактировать").click()
+                    await rutube_page.wait_for_timeout(2000)
+
+                # Теперь кнопка "Изменить" точно доступна на экране
+                async with rutube_page.expect_file_chooser() as fc_info:
+                    await rutube_page.get_by_role("button", name="Изменить").click()
+
+                file_chooser = await fc_info.value
+                await file_chooser.set_files(cover_path)
+                await rutube_page.wait_for_timeout(1500)
+
+                logger.info("Нажимаем 'Готово' и страхуемся от зависания Rutube...")
+                await rutube_page.get_by_role("button", name="Готово").click(timeout=5000)
+                await rutube_page.wait_for_timeout(3000)
+
+                # Если кнопка "Готово" всё еще торчит на экране, значит модалка зависла
+                if await rutube_page.get_by_role("button", name="Готово").is_visible():
+                    logger.warning("Rutube бесконечно грузит превью. Сбрасываем окно через Escape...")
+                    await rutube_page.keyboard.press("Escape")
+                    await rutube_page.wait_for_timeout(1000)
+
+                    if cover_attempt == cover_max_retries:
+                        raise RuntimeError("Rutube намертво завис на сохранении обложки после 3 попыток")
+                    else:
+                        logger.info("Пробуем загрузить картинку в этот же черновик еще раз...")
+                else:
+                    cover_uploaded = True
+                    break  # Успех, выходим из цикла!
+
+            except Exception as e:
+                logger.warning(f"Окно обложки повело себя нестандартно. Жмем Escape... ({e})")
                 await rutube_page.keyboard.press("Escape")
                 await rutube_page.wait_for_timeout(1000)
-        except Exception as e:
-            logger.warning(f"Окно обложки повело себя нестандартно. Жмем Escape... ({e})")
-            await rutube_page.keyboard.press("Escape")
-            await rutube_page.wait_for_timeout(1000)
+                if cover_attempt == cover_max_retries:
+                    raise Exception("Сбой модального окна обложки")
 
-        logger.info("Проверяем кнопку 'Сохранить'...")
-        try:
-            save_btn = rutube_page.get_by_role("button", name="Сохранить")
-            if await save_btn.is_visible(timeout=3000):
-                await save_btn.click()
-                logger.info("Трансляция сохранена.")
-            else:
-                logger.info("Окно закрылось автоматически, идем дальше.")
-        except Exception:
-            logger.warning("Ошибка при поиске кнопки 'Сохранить'. Идем дальше.")
+        # Если успешно загрузили, идем сохранять (если окно не закрылось само)
+        if cover_uploaded:
+            logger.info("Проверяем кнопку 'Сохранить'...")
+            try:
+                save_btn = rutube_page.get_by_role("button", name="Сохранить")
+                if await save_btn.is_visible(timeout=3000):
+                    await save_btn.click()
+                    logger.info("Трансляция сохранена.")
+                else:
+                    logger.info("Окно закрылось автоматически, идем дальше.")
+            except Exception:
+                logger.warning("Ошибка при поиске кнопки 'Сохранить'. Идем дальше.")
 
         await rutube_page.wait_for_timeout(2000)
 
@@ -191,7 +220,7 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str, de
                 except:
                     pass
 
-        keys_file = "stream_keys.txt"
+        # Просто удаляем строчку keys_file = ..., так как переменная теперь приходит извне
         with open(keys_file, "a", encoding="utf-8") as f:
             f.write(f"Матч: {match_data.stream_title}\n")
             f.write(f"URL видео: {video_url}\n")

@@ -165,6 +165,9 @@ class AFLPublisherApp(ctk.CTk):
             btn_del.pack(side="right", padx=15, pady=5)
 
     def build_ui(self):
+        # Жестко фиксируем нулевую колонку сайдбара (ширина 260px, не растягивается)
+        self.grid_columnconfigure(0, weight=0, minsize=260)
+
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
@@ -185,16 +188,17 @@ class AFLPublisherApp(ctk.CTk):
         self.btn_fetch = ctk.CTkButton(self.sidebar, text="2. Собрать расписание", font=("Arial", 14, "bold"),
                                        fg_color="#F57C00", hover_color="#E65100", height=40, state="disabled",
                                        command=self.start_fetch)
-        self.btn_fetch.pack(pady=(0, 20), padx=20, fill="x")
+        self.btn_fetch.pack(pady=(0, 10), padx=20, fill="x")
 
-        bottom_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        bottom_frame.pack(side="bottom", fill="x", pady=20)
+        # Контейнер для главных кнопок (теперь без привязки ко дну)
+        action_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        action_frame.pack(fill="x", pady=(10, 20))
 
-        self.btn_publish = ctk.CTkButton(bottom_frame, text="ОПУБЛИКОВАТЬ", font=("Arial", 16, "bold"), height=50,
+        self.btn_publish = ctk.CTkButton(action_frame, text="ОПУБЛИКОВАТЬ", font=("Arial", 16, "bold"), height=50,
                                          state="disabled", command=self.start_publish)
-        self.btn_publish.pack(pady=10, padx=20, fill="x")
+        self.btn_publish.pack(pady=(0, 10), padx=20, fill="x")
 
-        self.btn_stop = ctk.CTkButton(bottom_frame, text="СТОП", fg_color="#D32F2F", hover_color="#C62828", height=40,
+        self.btn_stop = ctk.CTkButton(action_frame, text="СТОП", fg_color="#D32F2F", hover_color="#C62828", height=40,
                                       state="disabled", command=self.stop_automation)
         self.btn_stop.pack(padx=20, fill="x")
 
@@ -220,28 +224,9 @@ class AFLPublisherApp(ctk.CTk):
                                              command=self.toggle_all_matches)
         self.cb_select_all.pack(side="left", padx=5)
 
-        self.matches_container = ctk.CTkFrame(self.tab_matches)
-        self.matches_container.grid(row=1, column=0, sticky="nsew", pady=(5, 10))
-        self.matches_container.grid_rowconfigure(0, weight=1)
-        self.matches_container.grid_columnconfigure(0, weight=1)
-
-        self.canvas = tk.Canvas(self.matches_container, bg="#2B2B2B", highlightthickness=0)
-        self.canvas.grid(row=0, column=0, sticky="nsew", padx=(10, 0), pady=10)
-
-        self.scrollbar = tk.Scrollbar(self.matches_container, orient="vertical", command=self.canvas.yview)
-        self.scrollbar.grid(row=0, column=1, sticky="ns", pady=10, padx=(0, 10))
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-
-        self.scroll_matches = ctk.CTkFrame(self.canvas, fg_color="#2B2B2B")
-        self.canvas_window = self.canvas.create_window((0, 0), window=self.scroll_matches, anchor="nw")
-
-        self.scroll_matches.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfig(self.canvas_window, width=e.width))
-
-        def _on_mousewheel(event):
-            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        # Используем встроенный оптимизированный скролл-фрейм
+        self.scroll_matches = ctk.CTkScrollableFrame(self.tab_matches, fg_color="#2B2B2B")
+        self.scroll_matches.grid(row=1, column=0, sticky="nsew", pady=(5, 10))
 
         ctk.CTkLabel(self.tab_matches, text="Лог работы:", font=("Arial", 12, "bold")).grid(row=2, column=0, sticky="w")
         self.log_console = ctk.CTkTextbox(self.tab_matches, font=("Consolas", 12), text_color="#A9B7C6",
@@ -380,21 +365,28 @@ class AFLPublisherApp(ctk.CTk):
 
         if not matches: return
 
+        # 1. ОПТИМИЗАЦИЯ ШРИФТОВ: Создаем объекты один раз до начала цикла
+        font_title = ctk.CTkFont(family="Arial", size=14, weight="bold")
+        font_sub = ctk.CTkFont(family="Arial", size=12)
+
         for match in matches:
-            card = ctk.CTkFrame(self.scroll_matches, fg_color="#333333", corner_radius=8)
-            card.pack(fill="x", pady=4, padx=5)
+            # 2. ПЛОСКАЯ КАРТОЧКА: Уже сделано отлично (без скруглений и прозрачности)
+            card = ctk.CTkFrame(self.scroll_matches, corner_radius=0, border_width=0, fg_color="#333333")
+            card.pack(pady=3, padx=10, fill="x")
             card.grid_columnconfigure(1, weight=1)
 
             var = ctk.BooleanVar(value=True)
             cb = ctk.CTkCheckBox(card, text="", variable=var, width=20)
             cb.grid(row=0, column=0, rowspan=2, padx=10, pady=10, sticky="w")
 
-            lbl_title = ctk.CTkLabel(card, text=match.stream_title, font=("Arial", 14, "bold"), anchor="w")
+            # Применяем заранее созданный шрифт
+            lbl_title = ctk.CTkLabel(card, text=match.stream_title, font=font_title, anchor="w")
             lbl_title.grid(row=0, column=1, padx=(0, 10), pady=(5, 0), sticky="ew")
 
             lbl_sub = ctk.CTkLabel(card, text=f"{match.match_date} | Тур {match.tour_number} | {match.stadium}",
-                                   text_color="gray", anchor="w")
+                                   text_color="gray", font=font_sub, anchor="w")
             lbl_sub.grid(row=1, column=1, padx=(0, 10), pady=(0, 5), sticky="ew")
+
             checkbox_vars.append((var, match, card))
 
         self.btn_publish.configure(state="normal")

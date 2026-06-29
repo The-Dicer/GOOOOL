@@ -49,26 +49,40 @@ async def process_selected_matches(selected_matches, pattern_mode="Автовы�
         context = browser.contexts[0]
 
         success_count = 0
+        success_count = 0
         for i, match in enumerate(selected_matches, 1):
             logger.info(f"--- Обработка [{i}/{len(selected_matches)}]: {match.stream_title} ---")
-            try:
-                # ПЕРЕДАЕМ СЛОВАРЬ ЦВЕТОВ В ГРАФИКУ
-                cover_path = await prepare_graphics(context, match, pattern_mode, league, default_color, stadium_colors)
 
-                video_url = await publish_stream(context, match, cover_path, desc_text)
+            # --- ВНЕДРЕНИЕ СИСТЕМЫ АВТОПОВТОРА ---
+            max_retries = 3  # Количество попыток на один матч
+            for attempt in range(1, max_retries + 1):
+                try:
+                    # ПЕРЕДАЕМ СЛОВАРЬ ЦВЕТОВ В ГРАФИКУ
+                    cover_path = await prepare_graphics(context, match, pattern_mode, league, default_color,
+                                                        stadium_colors)
 
-                if test_mode:
-                    logger.info(
-                        f"ТЕСТОВЫЙ РЕЖИМ: Ссылка {video_url} сохранена в txt. На Footballista не идем, пропускаем шаг.")
-                else:
-                    if video_url and match.match_url:
-                        logger.info(f"БОЕВОЙ РЕЖИМ: Вставляем видео {video_url} на сайт Footballista...")
-                        await add_video_link_to_match(context, match.match_url, video_url)
+                    video_url = await publish_stream(context, match, cover_path, desc_text, keys_file)
+
+                    if test_mode:
+                        logger.info(
+                            f"ТЕСТОВЫЙ РЕЖИМ: Ссылка {video_url} сохранена в txt. На Footballista не идем.")
                     else:
-                        logger.warning("Пропуск вставки: Rutube не вернул ссылку или у матча нет URL.")
+                        if video_url and match.match_url:
+                            logger.info(f"БОЕВОЙ РЕЖИМ: Вставляем видео {video_url} на сайт Footballista...")
+                            await add_video_link_to_match(context, match.match_url, video_url)
+                        else:
+                            logger.warning("Пропуск вставки: Rutube не вернул ссылку или у матча нет URL.")
 
-                success_count += 1
-            except Exception as e:
-                logger.error(f"Ошибка при обработке '{match.stream_title}': {e}")
+                    success_count += 1
+                    break  # УСПЕХ! Прерываем цикл попыток и идем к следующему матчу
+
+                except Exception as e:
+                    logger.error(f"Сбой при обработке (Попытка {attempt}/{max_retries}): {e}")
+                    if attempt < max_retries:
+                        logger.info("Rutube завис или выдал ошибку. Ждем 5 секунд и пробуем снова...")
+                        await asyncio.sleep(5)
+                    else:
+                        logger.error(f"Матч {match.stream_title} полностью пропущен из-за сбоев сайта.")
+            # -------------------------------------
 
         logger.info(f"Пайплайн завершен. Успешно: {success_count} из {len(selected_matches)}.")
