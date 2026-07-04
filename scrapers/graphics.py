@@ -174,42 +174,50 @@ async def prepare_graphics(context, match_data, pattern_mode="Автовыбор
         await graphics_page.wait_for_timeout(1000)
 
         # 4. ПОИСК И ВЫБОР ИГРЫ
-        logger.info(f"Ищем матч: {match_data.team_home} - {match_data.team_away}, {match_data.tour_number} round")
+        logger.info(f"Ищем матч: {match_data.team_home} - {match_data.team_away}, тур/стадия: {match_data.tour_number}")
 
         game_input = graphics_page.get_by_role("searchbox", name="Select game")
         await game_input.click()
 
-        # Вводим номер тура, чтобы отфильтровать список
+        # Пробуем сначала найти по номеру тура/стадии
         await game_input.fill(str(match_data.tour_number))
         await graphics_page.wait_for_timeout(2000)
 
-        # Подготавливаем названия команд (убираем лишние пробелы, спецсимволы и аббревиатуры ТП)
         import re
         safe_home = re.sub(r'\s+', ' ', match_data.team_home.replace('ТП', '').strip())
         safe_away = re.sub(r'\s+', ' ', match_data.team_away.replace('ТП', '').strip())
 
-        # Создаем регулярное выражение, которое ищет обе команды, игнорируя лишние пробелы и переносы между ними
+        # Паттерн, который ищет СТРОГО обе команды
         search_pattern = re.compile(f"{re.escape(safe_home)}.*{re.escape(safe_away)}", re.IGNORECASE)
-
-        # Ищем опцию по регулярному выражению, а не по точной строке
-        game_option = graphics_page.get_by_role("option", name=search_pattern)
-
-        # Если найдено несколько вариантов (например, из-за похожего названия), берем первый
-        game_option = game_option.first
+        game_option = graphics_page.get_by_role("option", name=search_pattern).first
 
         try:
             await game_option.wait_for(state="visible", timeout=5000)
             await game_option.click()
-            logger.info("Матч успешно найден и выбран из списка!")
+            logger.info("Матч успешно найден и выбран из списка (с учетом тура)!")
         except Exception:
-            logger.warning(
-                f"Умный поиск не нашел '{safe_home} - {safe_away}'. Пробуем искать только по первой команде...")
-            # План Б: ищем только по домашней команде
-            fallback_pattern = re.compile(re.escape(safe_home), re.IGNORECASE)
-            fallback_option = graphics_page.get_by_role("option", name=fallback_pattern).first
-            await fallback_option.wait_for(state="visible", timeout=5000)
-            await fallback_option.click()
-            logger.info("Матч выбран по запасному варианту (только домашняя команда)!")
+            logger.warning(f"Поиск с фильтром '{match_data.tour_number}' не удался. Ищем матч без учета тура...")
+
+            # Очищаем поле поиска и вводим название домашней команды
+            await game_input.fill(safe_home)
+            await graphics_page.wait_for_timeout(2000)
+
+            # Пытаемся найти матч с обеими командами в обновленном списке
+            try:
+                # Используем ТОТ ЖЕ search_pattern (Home .* Away)
+                fallback_option = graphics_page.get_by_role("option", name=search_pattern).first
+                await fallback_option.wait_for(state="visible", timeout=5000)
+                await fallback_option.click()
+                logger.info("Матч успешно выбран по запасному варианту (обе команды)!")
+            except Exception:
+                # Ультра-запасной план: вдруг на сайте команды написаны наоборот (Away - Home)?
+                logger.warning("Прямой порядок не найден. Пробуем обратный порядок (Гости - Хозяева)...")
+                reverse_pattern = re.compile(f"{re.escape(safe_away)}.*{re.escape(safe_home)}", re.IGNORECASE)
+                reverse_option = graphics_page.get_by_role("option", name=reverse_pattern).first
+
+                await reverse_option.wait_for(state="visible", timeout=5000)
+                await reverse_option.click()
+                logger.info("Матч выбран в обратном порядке команд!")
 
         await graphics_page.wait_for_timeout(1000)
 

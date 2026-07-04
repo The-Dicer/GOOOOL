@@ -59,7 +59,7 @@ def launch_chrome():
 class AFLPublisherApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("GOAL 2.0")
+        self.title("GOAL 2.1")
         self.geometry("1150x820")
         try:
             self.iconbitmap("icon.ico")
@@ -81,13 +81,13 @@ class AFLPublisherApp(ctk.CTk):
         self.check_browser_status()
 # pasha
     def load_config(self):
-        default_desc = "Заявляйся в AFL!\n\n+7 (915) 296-80-45\nhttps://vk.com/s.lebedev24\n\nТелеграм AFL — https://t.me/aflrussiа\n\nAFL VK – https://vk.com/aflmoscow"
+        default_desc =  "Заявляйся в AFL!\n\n+7 (916) 739-96-23\nhttps://vk.com/lkuka\n\nТелеграм AFL — https://t.me/aflrussiа\n\nAFL VK – https://vk.com/aflmoscow\n\nInstagram* AFL – платформа запрещена на территории РФ https://instagram.com/afl_russia\n\nПриложение AFL:\n\nIphone — https://apps.apple.com/ru/app/afl/id1555695558\n\nAndroid — https://play.google.com/store/apps/details?id=com.foo"
 
         default_stadiums = {
             "труд": "3", "ясенево": "24", "терехово": "19",
             "конструктор": "13", "дело спорта": "13", "тушино": "4",
             "октябрь": "4", "братиславский": "5", "торпедо": "22",
-            "олимпийская": "9", "красносельская": "11", "балашиха": "15"
+            "олимпийская": "9", "красносельская": "11", "балашиха": "15", "mfl": "24"
         }
 
         if not os.path.exists(CONFIG_FILE):

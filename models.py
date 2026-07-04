@@ -6,7 +6,7 @@ class MatchMetadata(BaseModel):
     team_home: str = Field(..., description="Название домашней команды")
     team_away: str = Field(..., description="Название гостевой команды")
     tournament_name: str = Field(..., description="Название турнира или лиги")
-    tour_number: int = Field(..., description="Номер тура")
+    tour_number: str = Field(..., description="Номер тура")
     field_number: Optional[int] = Field(None, description="Номер поля")
     match_date: str = Field(..., description="Дата матча")
     stadium: str = Field("Неизвестно", description="Место проведения матча (стадион)")
