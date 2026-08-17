@@ -1,5 +1,6 @@
 import re
 import logging
+import datetime
 from typing import List, Dict
 from models import MatchMetadata
 
@@ -101,7 +102,7 @@ async def enrich_matches_from_compact_view(context, matches: List[MatchMetadata]
         await compact_page.close()
 
 
-async def get_all_weekend_matches(context) -> List[MatchMetadata]:
+async def get_all_weekend_matches(context, debug_30_matches=False) -> List[MatchMetadata]:
     logger.info("Ищем вкладку Footballista...")
     footballista_page = next((p for p in context.pages if "footballista.ru" in p.url), None)
 
@@ -114,42 +115,66 @@ async def get_all_weekend_matches(context) -> List[MatchMetadata]:
     try:
         await footballista_page.wait_for_selector('a[href^="/admin/games/"]', state="visible", timeout=10000)
         match_cards = await footballista_page.locator('a[href^="/admin/games/"]').all()
-        weekend_days_map = {}
+        today = datetime.datetime.now().date()
+        current_year = today.year
+
+        month_map = {
+            "ЯНВ": 1, "ФЕВ": 2, "МАР": 3, "АПР": 4, "МАЯ": 5, "МАЙ": 5,
+            "ИЮН": 6, "ИЮЛ": 7, "АВГ": 8, "СЕН": 9, "ОКТ": 10, "НОЯ": 11, "ДЕК": 12
+        }
 
         for card in match_cards:
             date_raw = (await card.locator('div.date').inner_text()).strip().upper()
-            date_str = date_raw.split('(')[0].strip()
+            date_str = date_raw.split('(')[0].replace('.', '').strip()
 
-            # --- НОВАЯ ЛОГИКА С ВЕСАМИ ДНЕЙ НЕДЕЛИ ---
-            day_values = {"СР": 1, "ЧТ": 2, "ПТ": 3, "СБ": 4, "ВС": 5, "ПН": 6, "ВТ": 7}
-            
-            match_day = re.search(r'\((ПН|ВТ|СР|ЧТ|ПТ|СБ|ВС)\)', date_raw)
-            day_of_week = match_day.group(1) if match_day else None
-
-            if day_of_week and day_of_week in day_values:
-                current_value = day_values[day_of_week]
-
-                # Условие 1: Мы уже видели этот день недели, но дата другая (прошлая неделя)
-                if day_of_week in weekend_days_map and weekend_days_map[day_of_week] != date_str:
+            # --- ЛОГИКА ДЕБАГА ИЛИ ПРИВЯЗКА К ДАТЕ ---
+            if debug_30_matches:
+                if len(matches) >= 30:
+                    logger.info("Дебаг режим: собрано 30 матчей. Остановка.")
                     break
-
-                # Условие 2: Переход на прошлую неделю (вес дня увеличился)
-                min_seen = min([day_values[d] for d in weekend_days_map.keys()]) if weekend_days_map else 99
-                if current_value > min_seen:
-                    break
-
-                weekend_days_map[day_of_week] = date_str
             else:
-                break # Если дата вообще без дня недели (нечитаемая), останавливаемся
-            # -----------------------------------------
+                try:
+                    parts = date_str.split()
+                    if len(parts) >= 2:
+                        d_num = int(parts[0])
+                        m_str = parts[1][:3]
+                        m_num = month_map.get(m_str, today.month)
+
+                        match_date_obj = datetime.date(current_year, m_num, d_num)
+
+                        if match_date_obj < today - datetime.timedelta(days=180):
+                            match_date_obj = match_date_obj.replace(year=current_year + 1)
+                        elif match_date_obj > today + datetime.timedelta(days=180):
+                            match_date_obj = match_date_obj.replace(year=current_year - 1)
+                        # pashalka
+                        if match_date_obj < today:
+                            logger.info(f"Матч {date_raw} уже прошел. Останавливаем сбор.")
+                            break
+
+                except Exception as e:
+                    logger.warning(f"Не удалось распознать дату матча: {date_raw}. Игнорируем.")
+                    pass
+                    # -----------------------------------------
 
             champ = await card.locator('div.champ').inner_text()
+            # ... дальше идет старый код парсинга champ, stadium, tour_number и т.д.
             try:
                 stadium = (await card.locator("xpath=..").locator('.stadium').first.inner_text(timeout=1000)).strip()
             except:
                 stadium = "Неизвестно"
 
-            tour_number = int(re.search(r'\d+', await card.locator('div.round').inner_text()).group())
+            # --- УМНОЕ ИЗВЛЕЧЕНИЕ НОМЕРА ТУРА ИЛИ СТАДИИ ---
+            raw_round_text = await card.locator('div.round').inner_text()
+            raw_round_text = raw_round_text.strip()
+
+            # Если это обычный тур (есть слово "тур" или только цифры) - достаем число
+            if "тур" in raw_round_text.lower() or raw_round_text.isdigit():
+                round_match = re.search(r'\d+', raw_round_text)
+                tour_number = round_match.group() if round_match else raw_round_text
+            else:
+                # Если это плей-офф ("Финал", "Semifinal", "1/2 финала") - берем текст целиком
+                tour_number = raw_round_text
+            # -----------------------------------------------
 
             img_count = await card.locator('img').count()
             if img_count >= 2:

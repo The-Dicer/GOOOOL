@@ -7,7 +7,11 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-async def prepare_graphics(context, match_data, pattern_mode="Автовыбор", league="AFL Moscow 8x8") -> str:
+async def prepare_graphics(context, match_data, pattern_mode="Автовыбор", league="AFL Moscow 8x8",
+                           default_color: int = 3, stadium_colors: dict = None) -> str:
+    if stadium_colors is None:
+        stadium_colors = {}
+
     logger.info("Ищем вкладку AFL Graphics...")
     graphics_page = None
 
@@ -99,33 +103,21 @@ async def prepare_graphics(context, match_data, pattern_mode="Автовыбор
         logger.info("Проверяем и выбираем тип графики (Cover2)...")
 
         # Находим все элементы, похожие на выпадающие списки (дропдауны)
-        # Мы знаем, что выбор типа графики - это 3-й по счету дропдаун на странице
-        # (1-й - Лига, 2-й - Сезон, 3-й - Тип графики, 4-й - Выбор игры)
         cover_wrapper = graphics_page.locator(".mantine-Input-wrapper").nth(2)
         cover_input = cover_wrapper.locator("input")
 
-        # Даем странице немного времени после анимаций
         await graphics_page.wait_for_timeout(500)
 
-        # Получаем текущее значение инпута
         current_cover = await cover_input.input_value()
 
         if current_cover == "Cover2":
             logger.info("Тип графики 'Cover2' уже выбран, пропускаем шаг.")
         else:
             logger.info(f"Текущий тип '{current_cover}', меняем на 'Cover2'...")
-
-            # Прокручиваем инпут в зону видимости
             await cover_input.scroll_into_view_if_needed()
-
-            # Находим иконку шеврона (стрелочку вниз) внутри этого же 3-го враппера
             cover_chevron = cover_wrapper.locator(".mantine-Input-rightSection")
-
-            # Кликаем по шеврону, чтобы открыть меню
             await cover_chevron.click(force=True)
             await graphics_page.wait_for_timeout(500)
-
-            # Выбираем опцию "Cover2"
             await graphics_page.get_by_role("option", name="Cover2", exact=True).click(force=True)
             await graphics_page.wait_for_timeout(1000)
 
@@ -137,33 +129,22 @@ async def prepare_graphics(context, match_data, pattern_mode="Автовыбор
         await graphics_page.wait_for_timeout(500)
 
         stadium_lower = match_data.stadium.lower()
-        color_position = 3  # Дефолтная карточка цвета
+
+        # Получаем дефолтный цвет из интерфейса
+        color_position = int(default_color)
         pattern_position = 1
 
-        # Название стадиона -> номер позиции (nth-child)
-        if "труд" in stadium_lower:
-            color_position = 3
-        elif "ясенево" in stadium_lower:
-            color_position = 24
-        elif "терехово" in stadium_lower:
-            color_position = 19
-        elif "конструктор" in stadium_lower or "дело спорта" in stadium_lower:
-            color_position = 13
-        elif "тушино" in stadium_lower or "октябрь" in stadium_lower:
-            color_position = 4
-        elif "братиславский" in stadium_lower:
-            color_position = 5
-        elif "торпедо" in stadium_lower:
-            color_position = 22
-        elif "олимпийская" in stadium_lower:
-            color_position = 9
-        elif "балашиха" in stadium_lower:
-            color_position = 15
+        # === НОВАЯ УМНАЯ ЛОГИКА ВЫБОРА ЦВЕТА ===
+        for keyword, pos in stadium_colors.items():
+            if keyword.lower() in stadium_lower:
+                color_position = int(pos)
+                break
+        # =======================================
 
         # --- Определение паттерна (Авто или Жесткий выбор из интерфейса) ---
-        if pattern_mode == "Паттерн 1":
+        if pattern_mode in ["Паттерн 1", "1"]:
             pattern_position = 1
-        elif pattern_mode == "Паттерн 2":
+        elif pattern_mode in ["Паттерн 2", "2"]:
             pattern_position = 2
         else:
             # Режим "Автовыбор"
@@ -193,41 +174,50 @@ async def prepare_graphics(context, match_data, pattern_mode="Автовыбор
         await graphics_page.wait_for_timeout(1000)
 
         # 4. ПОИСК И ВЫБОР ИГРЫ
-        logger.info(f"Ищем матч: {match_data.team_home} - {match_data.team_away}, {match_data.tour_number} round")
+        logger.info(f"Ищем матч: {match_data.team_home} - {match_data.team_away}, тур/стадия: {match_data.tour_number}")
 
         game_input = graphics_page.get_by_role("searchbox", name="Select game")
         await game_input.click()
-        # Вводим номер тура, чтобы отфильтровать список
+
+        # Пробуем сначала найти по номеру тура/стадии
         await game_input.fill(str(match_data.tour_number))
         await graphics_page.wait_for_timeout(2000)
 
-        # Подготавливаем названия команд (убираем лишние пробелы, спецсимволы и аббревиатуры ТП)
         import re
         safe_home = re.sub(r'\s+', ' ', match_data.team_home.replace('ТП', '').strip())
         safe_away = re.sub(r'\s+', ' ', match_data.team_away.replace('ТП', '').strip())
 
-        # Создаем регулярное выражение, которое ищет обе команды, игнорируя лишние пробелы и переносы между ними
+        # Паттерн, который ищет СТРОГО обе команды
         search_pattern = re.compile(f"{re.escape(safe_home)}.*{re.escape(safe_away)}", re.IGNORECASE)
-
-        # Ищем опцию по регулярному выражению, а не по точной строке
-        game_option = graphics_page.get_by_role("option", name=search_pattern)
-
-        # Если найдено несколько вариантов (например, из-за похожего названия), берем первый
-        game_option = game_option.first
+        game_option = graphics_page.get_by_role("option", name=search_pattern).first
 
         try:
             await game_option.wait_for(state="visible", timeout=5000)
             await game_option.click()
-            logger.info("Матч успешно найден и выбран из списка!")
+            logger.info("Матч успешно найден и выбран из списка (с учетом тура)!")
         except Exception:
-            logger.warning(
-                f"Умный поиск не нашел '{safe_home} - {safe_away}'. Пробуем искать только по первой команде...")
-            # План Б: ищем только по домашней команде (обычно этого достаточно, так как мы уже отфильтровали по туру)
-            fallback_pattern = re.compile(re.escape(safe_home), re.IGNORECASE)
-            fallback_option = graphics_page.get_by_role("option", name=fallback_pattern).first
-            await fallback_option.wait_for(state="visible", timeout=5000)
-            await fallback_option.click()
-            logger.info("Матч выбран по запасному варианту (только домашняя команда)!")
+            logger.warning(f"Поиск с фильтром '{match_data.tour_number}' не удался. Ищем матч без учета тура...")
+
+            # Очищаем поле поиска и вводим название домашней команды
+            await game_input.fill(safe_home)
+            await graphics_page.wait_for_timeout(2000)
+
+            # Пытаемся найти матч с обеими командами в обновленном списке
+            try:
+                # Используем ТОТ ЖЕ search_pattern (Home .* Away)
+                fallback_option = graphics_page.get_by_role("option", name=search_pattern).first
+                await fallback_option.wait_for(state="visible", timeout=5000)
+                await fallback_option.click()
+                logger.info("Матч успешно выбран по запасному варианту (обе команды)!")
+            except Exception:
+                # Ультра-запасной план: вдруг на сайте команды написаны наоборот (Away - Home)?
+                logger.warning("Прямой порядок не найден. Пробуем обратный порядок (Гости - Хозяева)...")
+                reverse_pattern = re.compile(f"{re.escape(safe_away)}.*{re.escape(safe_home)}", re.IGNORECASE)
+                reverse_option = graphics_page.get_by_role("option", name=reverse_pattern).first
+
+                await reverse_option.wait_for(state="visible", timeout=5000)
+                await reverse_option.click()
+                logger.info("Матч выбран в обратном порядке команд!")
 
         await graphics_page.wait_for_timeout(1000)
 
@@ -250,29 +240,19 @@ async def prepare_graphics(context, match_data, pattern_mode="Автовыбор
         logger.info(f"Обложка успешно скачана: {download_path}")
         return str(download_path)
 
-
     except Exception as e:
-
         logger.error(f"Ошибка при генерации графики: {e}", exc_info=True)
-
         await graphics_page.screenshot(path="test_cover.png")
-
-        logger.info("📸 Сохранен скриншот ошибки: test_cover.png")
+        logger.info("Сохранен скриншот ошибки: test_cover.png")
 
         # Очистка интерфейса при ошибке
-
         try:
-
             logger.info("Пытаемся закрыть всплывающие окна через Escape...")
-
             await graphics_page.keyboard.press("Escape")
-
             await graphics_page.wait_for_timeout(500)
-
             await graphics_page.keyboard.press("Escape")  # Дважды, на случай если открыто два меню
-
         except:
-
             pass
 
         raise e
+# пидорас

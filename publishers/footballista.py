@@ -29,10 +29,10 @@ async def add_video_link_to_match(context, match_url: str, video_url: str) -> No
 
         # Ждем, чтобы сайт успел сохранить запрос
         await page.wait_for_timeout(1500)
-        logger.info("✅ Видео успешно прикреплено на сайте Footballista!")
-
+        logger.info("Видео успешно прикреплено на сайте Footballista!")
+# pasha
     except Exception as e:
-        logger.error(f"❌ Ошибка при добавлении видео на сайт: {e}")
+        logger.error(f"Ошибка при добавлении видео на сайт: {e}")
         await page.screenshot(path="footballista_link_error.png")
     finally:
         # Обязательно закрываем вкладку, чтобы они не плодились
