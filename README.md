@@ -1,4 +1,4 @@
-# GOAL 2.1 (Global Operator Automation League)
+# GOAL 2.2 (Global Operator Automation League(Да, да... Это точная расшифравка аббревиатуры))
 
 ![GOAL Interface](https://github.com/user-attachments/assets/0067d2a2-ae65-4306-940b-2f72842818ba)
 
