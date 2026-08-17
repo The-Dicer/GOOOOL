@@ -64,7 +64,11 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str, de
         await rutube_page.wait_for_timeout(500)
 
         logger.info("Нажимаем 'Сохранить и продолжить'...")
-        await rutube_page.get_by_role("button", name="Сохранить и продолжить").click()
+        try:
+            await rutube_page.get_by_role("button", name="Сохранить и продолжить").click(timeout=5000)
+        except Exception:
+            logger.info("Стандартная кнопка 'Сохранить и продолжить' не найдена, ищем по тексту...")
+            await rutube_page.locator("text=Сохранить и продолжить").first.click()
         await rutube_page.wait_for_timeout(2000)
 
         # 4. ЗАГРУЗКА ОБЛОЖКИ (ВНУТРЕННИЙ ЦИКЛ С ПЕРЕЗАГРУЗКОЙ)
@@ -85,9 +89,14 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str, de
                     await rutube_page.get_by_role("button", name="Редактировать").click()
                     await rutube_page.wait_for_timeout(2000)
 
-                # Теперь кнопка "Изменить" точно доступна на экране
+                # Нажимаем на иконку карандаша для изменения обложки (или старую кнопку "Изменить")
                 async with rutube_page.expect_file_chooser() as fc_info:
-                    await rutube_page.get_by_role("button", name="Изменить").click()
+                    try:
+                        pencil_icon = rutube_page.locator("svg:has(use[*|href='#IconDsEditorPencil'])").first
+                        await pencil_icon.click(timeout=3000)
+                    except Exception:
+                        logger.info("Иконка карандаша не найдена, пробуем старую кнопку 'Изменить'...")
+                        await rutube_page.get_by_role("button", name="Изменить").click()
 
                 file_chooser = await fc_info.value
                 await file_chooser.set_files(cover_path)
