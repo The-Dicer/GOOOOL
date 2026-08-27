@@ -1,208 +1,199 @@
 import re
+import json
 import logging
 import datetime
-from typing import List, Dict
+import urllib.parse
+from typing import List, Optional
 from models import MatchMetadata
 
 logger = logging.getLogger(__name__)
 
 
-async def enrich_matches_from_compact_view(context, matches: List[MatchMetadata]) -> List[MatchMetadata]:
-    logger.info("Открываем дополнительную вкладку Footballista в компактном режиме...")
-    compact_page = await context.new_page()
-    try:
-        await compact_page.set_viewport_size({"width": 400, "height": 900})
-        await compact_page.goto("https://footballista.ru/admin/games")
+async def get_all_weekend_matches(context, debug_30_matches: bool = False) -> List[MatchMetadata]:
+    """
+    Быстрый сбор матчей через прямой Footballista REST API с фильтрацией по дате.
+    
+    - Если debug_30_matches == False: фильтруются только актуальные матчи (дата матча >= сегодня).
+    - Если debug_30_matches == True: дебаг-режим, собирает до 30 матчей независимо от даты.
+    """
+    state_desc = "ВКЛЮЧЕН (30 матчей без фильтра по дате)" if debug_30_matches else "ВЫКЛЮЧЕН (только предстоящие матчи >= сегодня)"
+    logger.info(f"Сбор матчей через Footballista REST API... [Дебаг-режим: {state_desc}]")
 
-        # ИСПРАВЛЕНИЕ 1: Ждем просто загрузки основного HTML, игнорируя фоновый мусор
-        await compact_page.wait_for_load_state("domcontentloaded")
+    page = None
+    for p in context.pages:
+        if "footballista.ru" in p.url:
+            page = p
+            break
 
-        # ИСПРАВЛЕНИЕ 2: Ждем, пока появится хотя бы одна карточка (таймаут 15 сек)
-        await compact_page.wait_for_selector('a[href^="/admin/games/"]', state="visible", timeout=15000)
+    if not page:
+        page = await context.new_page()
+        await page.goto("https://footballista.ru/admin/games")
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_timeout(1500)
+    else:
+        await page.bring_to_front()
 
-        # Защита от гонки. Ждем, пока в DOM появится больше одной карточки
-        try:
-            await compact_page.wait_for_function(
-                'document.querySelectorAll("a[href^=\'/admin/games/\']").length > 1',
-                timeout=5000
-            )
-        except Exception:
-            pass  # Если матч реально один, просто идем дальше
-
-        await compact_page.wait_for_timeout(1000)  # Даем секунду на финальную перерисовку
-
-        compact_cards = await compact_page.locator('a[href^="/admin/games/"]').all()
-        logger.info(f"Найдено карточек в мобильной версии: {len(compact_cards)}")
-
-        compact_map: Dict[str, dict] = {}
-
-        for card in compact_cards:
-            href = await card.get_attribute("href")
-            if not href: continue
-
-            full_match_url = f"https://footballista.ru{href}"
-            imgs = card.locator("img")
-            img_count = await imgs.count()
-
-            logo_home, logo_away, abbr_home, abbr_away = "Нет логотипа", "Нет логотипа", "", ""
-
-            if img_count >= 2:
-                raw_logo_home = await imgs.nth(0).get_attribute("src")
-                raw_logo_away = await imgs.nth(1).get_attribute("src")
-
-                if raw_logo_home:
-                    logo_home = raw_logo_home.replace("-min", "-max") if not raw_logo_home.startswith(
-                        "/") else f"https://footballista.ru{raw_logo_home}".replace("-min", "-max")
-                if raw_logo_away:
-                    logo_away = raw_logo_away.replace("-min", "-max") if not raw_logo_away.startswith(
-                        "/") else f"https://footballista.ru{raw_logo_away}".replace("-min", "-max")
-
-                name_text = await card.locator("div.name").inner_text()
-                name_text = name_text.replace("\n", " ").replace("\r", " ").strip().upper()
-
-                # ИСПРАВЛЕНИЕ 3: Вырезаем счет, чтобы аббревиатуры были чистыми ("VEL" вместо "VEL1")
-                parts = re.split(r'\s*\d+\s*-\s*\d+\s*', name_text)
-                if len(parts) == 2 and parts[0] and parts[1]:
-                    abbr_home, abbr_away = parts[0].strip(), parts[1].strip()
-                else:
-                    # План Б: если счет еще не сыгран, делим просто по тире с пробелами
-                    fallback_parts = re.split(r'\s+-\s+', name_text)
-                    if len(fallback_parts) == 2:
-                        abbr_home, abbr_away = fallback_parts[0].strip(), fallback_parts[1].strip()
-                    else:
-                        # Запасной вариант (старая логика)
-                        clean_name = re.sub(r"\s+", "", name_text)
-                        short_match = re.search(r"([A-ZА-Я0-9]{2,8})-([A-ZА-Я0-9]{2,8})", clean_name)
-                        if short_match:
-                            abbr_home, abbr_away = short_match.group(1), short_match.group(2)
-
-            compact_map[full_match_url] = {
-                "logo_home": logo_home, "logo_away": logo_away,
-                "abbr_home": abbr_home, "abbr_away": abbr_away,
-            }
-
-        for match in matches:
-            extra = compact_map.get(match.match_url)
-            if extra:
-                match.logo_home = extra["logo_home"]
-                match.logo_away = extra["logo_away"]
-                match.abbr_home = extra["abbr_home"]
-                match.abbr_away = extra["abbr_away"]
-
-                if match.abbr_home and match.logo_home != "Нет логотипа":
-                    logger.info(f"Данные подтянуты: {match.abbr_home} vs {match.abbr_away}")
-                else:
-                    logger.warning(f"Частично нет лого/сокращений: {match.team_home} vs {match.team_away}")
-            else:
-                logger.warning(f"Матч не найден в мобильной версии: {match.team_home} vs {match.team_away}")
-
-        logger.info("Сбор дополнительных данных завершен.")
-        return matches
-    finally:
-        await compact_page.close()
-
-
-async def get_all_weekend_matches(context, debug_30_matches=False) -> List[MatchMetadata]:
-    logger.info("Ищем вкладку Footballista...")
-    footballista_page = next((p for p in context.pages if "footballista.ru" in p.url), None)
-
-    if not footballista_page:
-        raise Exception("Открой вкладку Footballista в браузере!")
-
-    await footballista_page.bring_to_front()
-    matches = []
-
-    try:
-        await footballista_page.wait_for_selector('a[href^="/admin/games/"]', state="visible", timeout=10000)
-        match_cards = await footballista_page.locator('a[href^="/admin/games/"]').all()
-        today = datetime.datetime.now().date()
-        current_year = today.year
-
-        month_map = {
-            "ЯНВ": 1, "ФЕВ": 2, "МАР": 3, "АПР": 4, "МАЯ": 5, "МАЙ": 5,
-            "ИЮН": 6, "ИЮЛ": 7, "АВГ": 8, "СЕН": 9, "ОКТ": 10, "НОЯ": 11, "ДЕК": 12
+    # Выполняем прямой сетевой запрос к REST API Footballista с извлечением токена из _ionickv
+    fetch_script = """async () => {
+        async function getIonicData() {
+            return new Promise((resolve) => {
+                if (!window.indexedDB) return resolve({});
+                const req = indexedDB.open('_ionicstorage');
+                req.onsuccess = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('_ionickv')) return resolve({});
+                    const tx = db.transaction('_ionickv', 'readonly');
+                    const store = tx.objectStore('_ionickv');
+                    const keysReq = store.getAllKeys();
+                    const valsReq = store.getAll();
+                    tx.oncomplete = () => {
+                        const items = {};
+                        const keys = keysReq.result || [];
+                        const vals = valsReq.result || [];
+                        for (let i = 0; i < keys.length; i++) {
+                            items[keys[i]] = vals[i];
+                        }
+                        resolve(items);
+                    };
+                    tx.onerror = () => resolve({});
+                };
+                req.onerror = () => resolve({});
+            });
         }
 
-        for card in match_cards:
-            date_raw = (await card.locator('div.date').inner_text()).strip().upper()
-            date_str = date_raw.split('(')[0].replace('.', '').strip()
+        const ionicStore = await getIonicData();
+        let token = ionicStore['token'] || null;
 
-            # --- ЛОГИКА ДЕБАГА ИЛИ ПРИВЯЗКА К ДАТЕ ---
-            if debug_30_matches:
-                if len(matches) >= 30:
-                    logger.info("Дебаг режим: собрано 30 матчей. Остановка.")
-                    break
-            else:
+        if (!token) {
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                const v = localStorage.getItem(k);
+                if (v && v.startsWith('eyJ')) {
+                    token = v;
+                    break;
+                }
+            }
+        }
+
+        if (!token) {
+            return { error: 'Токен авторизации не найден в браузере. Пожалуйста, откройте вкладку footballista.ru и залогиньтесь.' };
+        }
+
+        let cleanToken = typeof token === 'string' ? token.replace(/^["']+|["']+$/g, '').trim() : String(token);
+        const authHeader = cleanToken.startsWith('Bearer ') ? cleanToken : `Bearer ${cleanToken}`;
+
+        const headers = {
+            'Accept': 'application/json, text/plain, */*',
+            'Content-Type': 'application/json',
+            'Authorization': authHeader
+        };
+
+        const res = await fetch('https://footballista.ru/api/leagues/394/my_games', {
+            method: 'GET',
+            headers: headers
+        });
+
+        if (!res.ok) {
+            const errText = await res.text();
+            return { error: `HTTP ${res.status}: ${errText}` };
+        }
+        return await res.json();
+    }"""
+
+    raw_data = await page.evaluate(fetch_script)
+    if not raw_data or (isinstance(raw_data, dict) and "error" in raw_data):
+        err = raw_data.get("error") if isinstance(raw_data, dict) else "Пустой ответ от сервера"
+        raise RuntimeError(f"Ошибка вызова Footballista API: {err}")
+
+    raw_matches = []
+    if isinstance(raw_data, list):
+        raw_matches = raw_data
+    elif isinstance(raw_data, dict) and "data" in raw_data:
+        raw_matches = raw_data["data"]
+
+    logger.info(f"Получено {len(raw_matches)} матчей из Footballista API. Применяем фильтрацию...")
+
+    matches: List[MatchMetadata] = []
+    today = datetime.datetime.now().date()
+
+    for item_wrap in raw_matches:
+        try:
+            item = item_wrap.get("raw_data") or item_wrap
+
+            # 1. Проверка даты матча
+            date_raw = item.get("date")
+            match_dt = None
+            if date_raw:
                 try:
-                    parts = date_str.split()
-                    if len(parts) >= 2:
-                        d_num = int(parts[0])
-                        m_str = parts[1][:3]
-                        m_num = month_map.get(m_str, today.month)
-
-                        match_date_obj = datetime.date(current_year, m_num, d_num)
-
-                        if match_date_obj < today - datetime.timedelta(days=180):
-                            match_date_obj = match_date_obj.replace(year=current_year + 1)
-                        elif match_date_obj > today + datetime.timedelta(days=180):
-                            match_date_obj = match_date_obj.replace(year=current_year - 1)
-                        # pashalka
-                        if match_date_obj < today:
-                            logger.info(f"Матч {date_raw} уже прошел. Останавливаем сбор.")
-                            break
-
-                except Exception as e:
-                    logger.warning(f"Не удалось распознать дату матча: {date_raw}. Игнорируем.")
-                    pass
-                    # -----------------------------------------
-
-            champ = await card.locator('div.champ').inner_text()
-            # ... дальше идет старый код парсинга champ, stadium, tour_number и т.д.
-            try:
-                stadium = (await card.locator("xpath=..").locator('.stadium').first.inner_text(timeout=1000)).strip()
-            except:
-                stadium = "Неизвестно"
-
-            # --- УМНОЕ ИЗВЛЕЧЕНИЕ НОМЕРА ТУРА ИЛИ СТАДИИ ---
-            raw_round_text = await card.locator('div.round').inner_text()
-            raw_round_text = raw_round_text.strip()
-
-            # Если это обычный тур (есть слово "тур" или только цифры) - достаем число
-            if "тур" in raw_round_text.lower() or raw_round_text.isdigit():
-                round_match = re.search(r'\d+', raw_round_text)
-                tour_number = round_match.group() if round_match else raw_round_text
+                    dt = datetime.datetime.fromisoformat(str(date_raw).replace("Z", "+00:00"))
+                    match_dt = dt.astimezone(datetime.timezone(datetime.timedelta(hours=3)))
+                    match_date_str = match_dt.strftime("%d.%m.%Y %H:%M")
+                except Exception:
+                    match_date_str = str(date_raw)
             else:
-                # Если это плей-офф ("Финал", "Semifinal", "1/2 финала") - берем текст целиком
-                tour_number = raw_round_text
-            # -----------------------------------------------
+                match_date_str = str(today)
 
-            img_count = await card.locator('img').count()
-            if img_count >= 2:
-                team_home = await card.locator('img').nth(0).get_attribute('title')
-                team_away = await card.locator('img').nth(1).get_attribute('title')
-            else:
-                parts = re.split(r'\s+(?:\d+\s*-\s*\d+(?:\s*тп)?|-)?\s+', await card.locator('div.name').inner_text())
-                if len(parts) >= 2:
-                    team_home, team_away = parts[0], parts[1]
-                else:
+            # ФИЛЬТР: если дебаг выключен — берем строго матчи, которые еще не прошли (дата >= сегодня)
+            if not debug_30_matches and match_dt:
+                if match_dt.date() < today:
                     continue
 
-            href = await card.get_attribute("href")
+            # 2. Извлечение информации о командах и турнире
+            m_id = item.get("_id") or item.get("id")
+            team_home_obj = item.get("teamHome") or item.get("team1") or {}
+            team_away_obj = item.get("teamAway") or item.get("team2") or {}
+            champ_obj = item.get("champ") or item.get("tournament") or {}
+            stadium_obj = item.get("stadium") or {}
 
-            match_data = MatchMetadata(
-                team_home=team_home.strip(),
-                team_away=team_away.strip(),
-                tournament_name=champ.strip(),
+            team_home = (team_home_obj.get("name") or "Команда 1").strip()
+            team_away = (team_away_obj.get("name") or "Команда 2").strip()
+
+            abbr_home = team_home_obj.get("shortName") or team_home_obj.get("short_name") or ""
+            abbr_away = team_away_obj.get("shortName") or team_away_obj.get("short_name") or ""
+
+            logo_home_name = (team_home_obj.get("logo") or "").strip()
+            logo_away_name = (team_away_obj.get("logo") or "").strip()
+
+            if logo_home_name and not logo_home_name.startswith("http"):
+                logo_home = f"https://footballista.ru/api/img/logos/{urllib.parse.quote(logo_home_name)}-max.png?logoId=0"
+            elif logo_home_name:
+                logo_home = logo_home_name
+            else:
+                logo_home = "Нет логотипа"
+
+            if logo_away_name and not logo_away_name.startswith("http"):
+                logo_away = f"https://footballista.ru/api/img/logos/{urllib.parse.quote(logo_away_name)}-max.png?logoId=0"
+            elif logo_away_name:
+                logo_away = logo_away_name
+            else:
+                logo_away = "Нет логотипа"
+
+            champ_name = (champ_obj.get("name") or "AFL").strip()
+            stadium_name = (stadium_obj.get("name") or "Неизвестно").strip()
+            tour_number = str(item.get("tourNumber") or item.get("tour") or item.get("round") or "1").strip()
+
+            metadata = MatchMetadata(
+                team_home=team_home,
+                team_away=team_away,
+                tournament_name=champ_name,
                 tour_number=tour_number,
-                match_date=date_raw,
-                stadium=stadium,
-                match_url=f"https://footballista.ru{href}"
+                match_date=match_date_str,
+                stadium=stadium_name,
+                match_url=f"https://footballista.ru/admin/games/{m_id}/{urllib.parse.quote(f'{team_home}-{team_away}')}" if m_id else None,
+                logo_home=logo_home,
+                logo_away=logo_away,
+                abbr_home=abbr_home,
+                abbr_away=abbr_away
             )
-            matches.append(match_data)
+            matches.append(metadata)
 
-        matches = await enrich_matches_from_compact_view(context, matches)
-        return matches
+            # В дебаг-режиме останавливаемся ровно на 30 матчах
+            if debug_30_matches and len(matches) >= 30:
+                logger.info("Дебаг-режим: собрано ровно 30 матчей. Остановка.")
+                break
 
-    except Exception as e:
-        logger.error(f"Ошибка парсинга Footballista: {e}")
-        raise e
+        except Exception as e:
+            logger.warning(f"Ошибка парсинга элемента матча: {e}")
+
+    logger.info(f"Итого отобрано для работы: {len(matches)} матчей.")
+    return matches

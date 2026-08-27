@@ -1,0 +1,35 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# PyInstaller / Build
+build/
+dist/
+*.manifest
+*.spec
+
+# IDE / Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Project runtime & generated files
+chrome_debug_profile/
+covers/
+stream_keys*.txt
+*.log
+
+# Temp dumps
+games_comparison.json
+rutube_endpoints.json
+
+# Environments
+.env
+venv/
+.venv/
+env/
+ENV/

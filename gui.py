@@ -13,8 +13,6 @@ from main import fetch_matches_for_ui, process_selected_matches
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-pipeline_task = None
-checkbox_vars = []
 CONFIG_FILE = "config.json"
 
 
@@ -39,7 +37,7 @@ def is_chrome_running():
     try:
         urllib.request.urlopen("http://localhost:9222/json/version", timeout=1)
         return True
-    except:
+    except Exception:
         return False
 
 
@@ -59,12 +57,15 @@ def launch_chrome():
 class AFLPublisherApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("GOAL 2.1")
+        self.title("GOAL 3.0")
         self.geometry("1150x820")
         try:
             self.iconbitmap("icon.ico")
-        except:
+        except Exception:
             pass
+
+        self.pipeline_task = None
+        self.checkbox_vars = []
 
         self.test_mode_var = ctk.BooleanVar(value=False)
         self.debug_30_var = ctk.BooleanVar(value=False)
@@ -79,7 +80,7 @@ class AFLPublisherApp(ctk.CTk):
         self.load_config()
         self.build_ui()
         self.check_browser_status()
-# pasha
+
     def load_config(self):
         default_desc =  "Заявляйся в AFL!\n\n+7 (916) 739-96-23\nhttps://vk.com/lkuka\n\nТелеграм AFL — https://t.me/aflrussiа\n\nAFL VK – https://vk.com/aflmoscow\n\nInstagram* AFL – платформа запрещена на территории РФ https://instagram.com/afl_russia\n\nПриложение AFL:\n\nIphone — https://apps.apple.com/ru/app/afl/id1555695558\n\nAndroid — https://play.google.com/store/apps/details?id=com.foo"
 
@@ -228,10 +229,40 @@ class AFLPublisherApp(ctk.CTk):
         self.scroll_matches = ctk.CTkScrollableFrame(self.tab_matches, fg_color="#2B2B2B")
         self.scroll_matches.grid(row=1, column=0, sticky="nsew", pady=(5, 10))
 
-        ctk.CTkLabel(self.tab_matches, text="Лог работы:", font=("Arial", 12, "bold")).grid(row=2, column=0, sticky="w")
+        log_header_frame = ctk.CTkFrame(self.tab_matches, fg_color="transparent")
+        log_header_frame.grid(row=2, column=0, sticky="ew", pady=(2, 2))
+
+        ctk.CTkLabel(log_header_frame, text="Лог работы:", font=("Arial", 12, "bold")).pack(side="left")
+
+        self.btn_clear_logs = ctk.CTkButton(log_header_frame, text="🗑️ Очистить", width=80, height=24,
+                                            font=("Arial", 11), fg_color="#444444", hover_color="#555555",
+                                            command=self.clear_logs)
+        self.btn_clear_logs.pack(side="right", padx=(5, 0))
+
+        self.btn_copy_logs = ctk.CTkButton(log_header_frame, text="📋 Скопировать логи", width=140, height=24,
+                                           font=("Arial", 11), fg_color="#1F6AA5", hover_color="#144870",
+                                           command=self.copy_logs_to_clipboard)
+        self.btn_copy_logs.pack(side="right", padx=(5, 0))
+
         self.log_console = ctk.CTkTextbox(self.tab_matches, font=("Consolas", 12), text_color="#A9B7C6",
                                           fg_color="#1E1E1E")
         self.log_console.grid(row=3, column=0, sticky="nsew", pady=(0, 5))
+
+        # Контекстное меню (ПКМ) для логов
+        self.log_menu = tk.Menu(self, tearoff=0, bg="#2B2B2B", fg="white", activebackground="#404040", activeforeground="white")
+        self.log_menu.add_command(label="Копировать выделенное", command=self.copy_selected_log)
+        self.log_menu.add_command(label="Скопировать все логи", command=self.copy_logs_to_clipboard)
+        self.log_menu.add_command(label="Выделить всё", command=self.select_all_logs)
+        self.log_menu.add_separator()
+        self.log_menu.add_command(label="Очистить логи", command=self.clear_logs)
+
+        def show_log_menu(event):
+            try:
+                self.log_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                self.log_menu.grab_release()
+
+        self.log_console._textbox.bind("<Button-3>", show_log_menu)
 
         # --- ВКЛАДКА 2: НАСТРОЙКИ СИСТЕМЫ ---
         settings_frame = ctk.CTkFrame(self.tab_settings, fg_color="transparent")
@@ -336,7 +367,7 @@ class AFLPublisherApp(ctk.CTk):
 
     def toggle_all_matches(self):
         state = self.select_all_var.get()
-        for var, _, _ in checkbox_vars:
+        for var, _, _ in self.checkbox_vars:
             var.set(state)
 
     def start_fetch(self):
@@ -344,7 +375,6 @@ class AFLPublisherApp(ctk.CTk):
         threading.Thread(target=self._run_async_fetch, daemon=True).start()
 
     def _run_async_fetch(self):
-        global checkbox_vars
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -358,10 +388,9 @@ class AFLPublisherApp(ctk.CTk):
             self.after(0, lambda: self.btn_fetch.configure(state="normal", text="2. Обновить расписание"))
 
     def _render_match_cards(self, matches):
-        global checkbox_vars
         for widget in self.scroll_matches.winfo_children():
             widget.destroy()
-        checkbox_vars.clear()
+        self.checkbox_vars.clear()
 
         if not matches: return
 
@@ -387,13 +416,13 @@ class AFLPublisherApp(ctk.CTk):
                                    text_color="gray", font=font_sub, anchor="w")
             lbl_sub.grid(row=1, column=1, padx=(0, 10), pady=(0, 5), sticky="ew")
 
-            checkbox_vars.append((var, match, card))
+            self.checkbox_vars.append((var, match, card))
 
         self.btn_publish.configure(state="normal")
         logging.info("Матчи загружены. Проверьте список перед публикацией.")
 
     def start_publish(self):
-        selected = [m for var, m, _ in checkbox_vars if var.get()]
+        selected = [m for var, m, _ in self.checkbox_vars if var.get()]
         if not selected:
             logging.warning("Нет выбранных матчей.")
             return
@@ -422,15 +451,14 @@ class AFLPublisherApp(ctk.CTk):
 
     def _run_async_publish(self, selected_matches, pattern_mode, test_mode, league, default_color, desc_text,
                            colors_dict):
-        global pipeline_task
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        pipeline_task = loop.create_task(
+        self.pipeline_task = loop.create_task(
             process_selected_matches(selected_matches, pattern_mode, test_mode, league, default_color, desc_text,
                                      colors_dict))
 
         try:
-            loop.run_until_complete(pipeline_task)
+            loop.run_until_complete(self.pipeline_task)
         except asyncio.CancelledError:
             logging.warning("Остановлено пользователем.")
         except Exception as e:
@@ -441,10 +469,43 @@ class AFLPublisherApp(ctk.CTk):
             self.after(0, lambda: self.btn_stop.configure(state="disabled"))
 
     def stop_automation(self):
-        global pipeline_task
-        if pipeline_task and not pipeline_task.done():
+        if self.pipeline_task and not self.pipeline_task.done():
             logging.info("Посылаем сигнал остановки...")
-            pipeline_task.get_loop().call_soon_threadsafe(pipeline_task.cancel)
+            self.pipeline_task.get_loop().call_soon_threadsafe(self.pipeline_task.cancel)
+
+    def copy_logs_to_clipboard(self):
+        try:
+            text = self.log_console.get("1.0", tk.END).strip()
+            if text:
+                self.clipboard_clear()
+                self.clipboard_append(text)
+                logging.info("📋 Все логи скопированы в буфер обмена!")
+        except Exception as e:
+            logging.error(f"Не удалось скопировать логи: {e}")
+
+    def copy_selected_log(self):
+        try:
+            sel = self.log_console._textbox.selection_get()
+            if sel:
+                self.clipboard_clear()
+                self.clipboard_append(sel)
+                logging.info("📋 Выделенный фрагмент логов скопирован!")
+                return
+        except Exception:
+            pass
+        self.copy_logs_to_clipboard()
+
+    def select_all_logs(self):
+        try:
+            self.log_console._textbox.tag_add("sel", "1.0", "end")
+        except Exception:
+            pass
+
+    def clear_logs(self):
+        self.log_console.configure(state="normal")
+        self.log_console.delete("1.0", tk.END)
+        self.log_console.configure(state="disabled")
+        logging.info("Логи очищены.")
 
 
 if __name__ == "__main__":
