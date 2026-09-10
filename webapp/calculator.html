@@ -603,16 +603,16 @@
       <div class="rate-row">
         <span class="rate-label">Моя ставка за матч:</span>
         <div class="rate-input-wrap">
-          <input type="number" id="rateInput" class="rate-input" value="1200" step="50" min="0" oninput="onRateChanged()">
+          <input type="number" id="rateInput" class="rate-input" value="1250" step="50" min="0" oninput="onRateChanged()">
           <span class="rate-unit">₽</span>
         </div>
       </div>
       <div class="quick-rates">
         <span style="font-size: 0.75rem; color: var(--text-muted); align-self: center;">Быстро:</span>
-        <button class="btn-quick" onclick="setQuickRate(800)">800 ₽</button>
         <button class="btn-quick" onclick="setQuickRate(1000)">1 000 ₽</button>
-        <button class="btn-quick" onclick="setQuickRate(1200)">1 200 ₽</button>
-        <button class="btn-quick" onclick="setQuickRate(1500)">1 500 ₽</button>
+        <button class="btn-quick" onclick="setQuickRate(1250)">1 250 ₽</button>
+        <button class="btn-quick" onclick="setQuickRate(1300)">1 300 ₽</button>
+        <button class="btn-quick" onclick="setQuickRate(1350)">1 350 ₽</button>
       </div>
     </div>
 
@@ -695,7 +695,7 @@
     let weekNumber = 2;
     let currentMonthIndex = 8; // Сентябрь (0-11)
     let currentYear = 2026;
-    let rate = 1200;
+    let rate = 1250;
 
     let weekendMatches = [];
     let customMatches = [];
