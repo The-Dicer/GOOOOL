@@ -226,13 +226,13 @@ async def auto_register_operator_1_if_needed(cfg: Dict[str, Any]) -> None:
                 valid, cnt, desc = validate_footballista_token(token)
                 if valid:
                     op1 = {
-                        "name": "Оператор 1 (Основной)",
+                        "name": "Я",
                         "chat_id": primary_chat_id,
                         "footballista_token": token
                     }
                     cfg["operators"] = [op1]
                     save_config(cfg)
-                    print(f"[УСПЕХ] Оператор 1 (Основной) автоматически зарегистрирован! ({desc})")
+                    print(f"[УСПЕХ] Оператор 'Я' автоматически зарегистрирован! ({desc})")
                     return
     except Exception as e:
         print(f"[ПРЕДУПРЕЖДЕНИЕ] Не удалось автоматически зафиксировать токен Оператора 1: {e}")
