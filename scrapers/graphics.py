@@ -425,6 +425,8 @@ async def _run_graphics_flow(graphics_page, match: MatchMetadata, pattern_mode: 
     game_input = graphics_page.locator("input[placeholder='Select game']").first
     await game_input.wait_for(state="visible", timeout=6000)
     await game_input.click(force=True)
+    await game_input.fill("")
+    await graphics_page.wait_for_timeout(150)
     await game_input.fill(str(match.tour_number))
     await graphics_page.wait_for_timeout(400)
 
@@ -446,13 +448,27 @@ async def _run_graphics_flow(graphics_page, match: MatchMetadata, pattern_mode: 
             await fallback_opt.click(force=True)
             logger.info("Матч выбран по названию команд!")
         except Exception:
-            rev_pattern = re.compile(f"{re.escape(safe_away)}.*{re.escape(safe_home)}", re.IGNORECASE)
-            rev_opt = graphics_page.get_by_role("option", name=rev_pattern).first
-            await rev_opt.wait_for(state="visible", timeout=2500)
-            await rev_opt.click(force=True)
-            logger.info("Матч выбран в обратном порядке!")
+            try:
+                rev_pattern = re.compile(f"{re.escape(safe_away)}.*{re.escape(safe_home)}", re.IGNORECASE)
+                rev_opt = graphics_page.get_by_role("option", name=rev_pattern).first
+                await rev_opt.wait_for(state="visible", timeout=2000)
+                await rev_opt.click(force=True)
+                logger.info("Матч выбран в обратном порядке!")
+            except Exception:
+                # Поиск по домашней команде в текущем туре
+                home_opt = graphics_page.get_by_role("option", name=re.compile(re.escape(safe_home), re.IGNORECASE)).first
+                await home_opt.wait_for(state="visible", timeout=2500)
+                await home_opt.click(force=True)
+                logger.info("Матч выбран по домашней команде!")
+
+    # Проверка, что выбранный матч действительно изменился в поле ввода
+    selected_val = await game_input.input_value()
+    logger.info(f"Выбран матч в селекторе: '{selected_val}'")
+    if not any(token.lower() in selected_val.lower() for token in [safe_home, safe_away] if len(token) > 2):
+        raise RuntimeError(f"Выбранный матч '{selected_val}' не соответствует целевому '{safe_home} - {safe_away}'!")
 
     # Ждем завершения загрузки изображений и логотипов команд в превью
+    await graphics_page.wait_for_timeout(500)
     await graphics_page.evaluate("""async () => {
         const imgs = Array.from(document.querySelectorAll('img'));
         await Promise.all(imgs.map(img => {
@@ -460,7 +476,7 @@ async def _run_graphics_flow(graphics_page, match: MatchMetadata, pattern_mode: 
             return new Promise(r => {
                 img.onload = r;
                 img.onerror = r;
-                setTimeout(r, 2000);
+                setTimeout(r, 2500);
             });
         }));
     }""")
