@@ -468,24 +468,31 @@ def print_operators_table(cfg: Dict[str, Any]) -> None:
     print("----------------------------------------------------------------------\n")
 
 
-async def refresh_operator_token(cfg: Dict[str, Any]) -> None:
+async def refresh_operator_token(cfg: Dict[str, Any], target_index: Optional[int] = None) -> None:
     """Обновление токена Footballista для существующего оператора."""
     operators = cfg.get("operators", [])
     if not operators:
         print("[ИНФО] Нет зарегистрированных операторов.")
         return
 
-    print("\nВыберите оператора для обновления токена Footballista:")
-    for idx, op in enumerate(operators, 1):
-        print(f"  {idx}. {op.get('name')} (Chat ID: {op.get('chat_id')})")
-    print("  0. Отмена")
+    if target_index is not None and 0 <= target_index < len(operators):
+        target_op = operators[target_index]
+    else:
+        print("\nВыберите оператора для обновления токена Footballista:")
+        for idx, op in enumerate(operators, 1):
+            print(f"  {idx}. {op.get('name')} (Chat ID: {op.get('chat_id')})")
+        print("  0. Отмена")
 
-    choice = input("Номер оператора: ").strip()
-    if not choice.isdigit() or int(choice) < 1 or int(choice) > len(operators):
-        print("Отмена.")
-        return
+        try:
+            choice = input("Номер оператора: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            choice = ""
+        if not choice.isdigit() or int(choice) < 1 or int(choice) > len(operators):
+            print("Отмена.")
+            return
 
-    target_op = operators[int(choice) - 1]
+        target_op = operators[int(choice) - 1]
+
     op_name = target_op.get("name")
 
     if not ensure_chrome_ready():
@@ -588,6 +595,10 @@ async def async_main():
             return
         elif arg in ("--test", "-t"):
             test_telegram_broadcast(cfg)
+            return
+        elif arg in ("--refresh", "-r"):
+            op_idx = int(sys.argv[2]) - 1 if len(sys.argv) > 2 and sys.argv[2].isdigit() else None
+            await refresh_operator_token(cfg, target_index=op_idx)
             return
 
     # Интерактивное меню
