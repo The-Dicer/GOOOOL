@@ -43,15 +43,8 @@ async def ensure_rutube_channel(page, target_channel_id: str = "77095292") -> di
             'X-CSRFToken': csrfToken
         };
 
-        // 1. Проверяем, не активен ли уже целевой канал
         const scope = getCookieScope();
-        if (scope && String(scope.channel_id) === String(targetId)) {
-            return {
-                already_active: true,
-                channel_id: targetId,
-                role: (scope.channel_scopes && scope.channel_scopes[0]) || 'moderator'
-            };
-        }
+        const isTargetOwner = String(targetId).toLowerCase() === 'owner' || String(targetId).toLowerCase() === 'personal' || String(targetId) === '20432577';
 
         // 2. Запрашиваем список доступных каналов и ролей пользователя
         let channels = [];
@@ -66,7 +59,42 @@ async def ensure_rutube_channel(page, target_channel_id: str = "77095292") -> di
             }
         } catch (e) {}
 
-        const targetChannel = channels.find(c => String(c.channel_id) === String(targetId));
+        const ownerChannel = channels.find(c => c.permission === 'owner') || { channel_id: 20432577, channel_name: 'Личный канал', permission: 'owner' };
+        const targetChannel = isTargetOwner ? ownerChannel : channels.find(c => String(c.channel_id) === String(targetId));
+
+        if (isTargetOwner) {
+            // Переключение на личный канал владельца (удаление cookie scope)
+            if (!scope || String(scope.channel_id) === String(ownerChannel.channel_id)) {
+                return {
+                    already_active: true,
+                    channel_id: String(ownerChannel.channel_id),
+                    channel_name: ownerChannel.channel_name,
+                    role: 'owner',
+                    available_channels: channels.map(c => ({ id: String(c.channel_id), name: c.channel_name || c.name, role: c.permission }))
+                };
+            }
+            document.cookie = "scope=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=.rutube.ru";
+            document.cookie = "scope=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=studio.rutube.ru";
+            document.cookie = "scope=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            return {
+                already_active: false,
+                api_switched: true,
+                verified_active: true,
+                channel_id: String(ownerChannel.channel_id),
+                channel_name: ownerChannel.channel_name,
+                role: 'owner',
+                available_channels: channels.map(c => ({ id: String(c.channel_id), name: c.channel_name || c.name, role: c.permission }))
+            };
+        }
+
+        // 1. Проверяем, не активен ли уже целевой канал
+        if (scope && String(scope.channel_id) === String(targetId)) {
+            return {
+                already_active: true,
+                channel_id: targetId,
+                role: (scope.channel_scopes && scope.channel_scopes[0]) || 'moderator'
+            };
+        }
 
         // 3. Вызываем API переключения канала permissions/channel/{targetId}/
         let apiSwitched = false;
@@ -108,6 +136,12 @@ async def ensure_rutube_channel(page, target_channel_id: str = "77095292") -> di
             available_channels: channels.map(c => ({ id: String(c.channel_id), name: c.channel_name || c.name, role: c.permission }))
         };
     }"""
+
+    if target_id_str.lower() in ["owner", "personal", "20432577"]:
+        try:
+            await page.context.clear_cookies(name="scope")
+        except Exception:
+            pass
 
     try:
         res = await page.evaluate(switch_script, target_id_str)
@@ -167,9 +201,11 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str, de
     Создание трансляции на Rutube Studio через прямой REST API v2.
     Работает за 1-2 секунды, точно извлекая RTMP-сервер и ключ трансляции.
     """
+    target_ch = "owner" if test_mode else (rutube_channel_id or "77095292")
     if test_mode:
-        logger.info("[ТЕСТОВЫЙ РЕЖИМ] Переключение канала Rutube отключено (публикация в текущий тестовый канал).")
-        rutube_channel_id = None
+        logger.info("[ТЕСТОВЫЙ РЕЖИМ] Переключение Rutube Studio на личный канал оператора (автономно, без Footballista).")
+    else:
+        logger.info(f"[БОЕВОЙ РЕЖИМ] Проверка и переключение на официальный канал лиги {target_ch}.")
 
     logger.info("Подготовка страницы Rutube Studio для работы по API...")
 
@@ -185,9 +221,8 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str, de
         await page.wait_for_load_state("domcontentloaded")
         await page.wait_for_timeout(1000)
 
-    # Проверка и переключение на канал лиги (только в боевом режиме при наличии ID)
-    if not test_mode and rutube_channel_id:
-        await ensure_rutube_channel(page, rutube_channel_id)
+    # Проверка и переключение на целевой канал (личный при тесте или лиги в бою)
+    await ensure_rutube_channel(page, target_ch)
 
     # Читаем обложку в base64 (если есть)
     cover_base64 = None
