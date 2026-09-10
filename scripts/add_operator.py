@@ -20,11 +20,15 @@ import urllib.parse
 import subprocess
 from typing import Optional, Dict, Any, List, Tuple
 
+# Исключаем локальный порт Chrome из системного прокси
+os.environ["NO_PROXY"] = "localhost,127.0.0.1,::1"
+os.environ["no_proxy"] = "localhost,127.0.0.1,::1"
+
 # Установка безопасного вывода UTF-8 для консоли Windows
 if sys.platform == "win32":
     try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+        sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
+        sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
     except Exception:
         pass
 
@@ -69,7 +73,7 @@ def find_chrome_executable() -> str:
 def is_chrome_running() -> bool:
     """Проверка доступности CDP порта 9222."""
     try:
-        req = urllib.request.Request("http://localhost:9222/json/version")
+        req = urllib.request.Request("http://127.0.0.1:9222/json/version")
         with urllib.request.urlopen(req, timeout=1) as resp:
             return resp.status == 200
     except Exception:
@@ -204,7 +208,7 @@ async def auto_register_operator_1_if_needed(cfg: Dict[str, Any]) -> None:
     try:
         from playwright.async_api import async_playwright
         async with async_playwright() as p:
-            browser = await p.chromium.connect_over_cdp("http://localhost:9222")
+            browser = await p.chromium.connect_over_cdp("http://127.0.0.1:9222")
             context = browser.contexts[0]
             page = None
             for p_item in context.pages:
@@ -329,7 +333,10 @@ async def onboard_operator_flow(cfg: Dict[str, Any], custom_name: Optional[str] 
     # Имя оператора
     if not custom_name:
         default_num = len(cfg.get("operators", [])) + 1
-        name_input = input(f"Введите имя нового оператора [Оператор {default_num}]: ").strip()
+        try:
+            name_input = input(f"Введите имя нового оператора [Оператор {default_num}]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            name_input = ""
         op_name = name_input or f"Оператор {default_num}"
     else:
         op_name = custom_name
@@ -347,7 +354,7 @@ async def onboard_operator_flow(cfg: Dict[str, Any], custom_name: Optional[str] 
 
     from playwright.async_api import async_playwright
     async with async_playwright() as p:
-        browser = await p.chromium.connect_over_cdp("http://localhost:9222")
+        browser = await p.chromium.connect_over_cdp("http://127.0.0.1:9222")
 
         # СОЗДАЕМ ИЗОЛИРОВАННЫЙ INCOGNITO КОНТЕКСТ ДЛЯ ВТОРОГО ОПЕРАТОРА
         incognito_context = await browser.new_context()
@@ -395,8 +402,10 @@ async def onboard_operator_flow(cfg: Dict[str, Any], custom_name: Optional[str] 
 
     tg_user = poll_new_telegram_chat(bot_token, known_ids, timeout_sec=180)
     if not tg_user:
-        print("\n[ПРЕДУПРЕЖДЕНИЕ] Не удалось зафиксировать новое сообщение в Telegram боте.")
-        chat_id_input = input("Вы можете ввести Telegram Chat ID вручную (или Enter для пропуска): ").strip()
+        try:
+            chat_id_input = input("Вы можете ввести Telegram Chat ID вручную (или Enter для пропуска): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            chat_id_input = ""
         if chat_id_input:
             tg_user = {"chat_id": chat_id_input, "name": op_name, "username": ""}
         else:
@@ -485,7 +494,7 @@ async def refresh_operator_token(cfg: Dict[str, Any]) -> None:
     print(f"\n[ИНФО] Открываю окно авторизации для '{op_name}'...")
     from playwright.async_api import async_playwright
     async with async_playwright() as p:
-        browser = await p.chromium.connect_over_cdp("http://localhost:9222")
+        browser = await p.chromium.connect_over_cdp("http://127.0.0.1:9222")
         incognito_context = await browser.new_context()
         auth_page = await incognito_context.new_page()
         await auth_page.goto("https://footballista.ru/admin/games")

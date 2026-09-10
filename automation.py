@@ -13,6 +13,16 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 
 import requests
+
+# Исключаем локальные адреса из системного прокси, чтобы Playwright не слал локальный CDP трафик в прокси
+for _proxy_key in ["NO_PROXY", "no_proxy"]:
+    _curr = os.environ.get(_proxy_key, "")
+    _proxies = [p.strip() for p in _curr.split(",") if p.strip()]
+    for _h in ["localhost", "127.0.0.1", "::1"]:
+        if _h not in _proxies:
+            _proxies.append(_h)
+    os.environ[_proxy_key] = ",".join(_proxies)
+
 from playwright.async_api import async_playwright
 
 from models import MatchMetadata
