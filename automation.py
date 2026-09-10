@@ -407,7 +407,7 @@ def build_calculator_url(
 
     raw_json = json.dumps(payload, ensure_ascii=False)
     b64_data = base64.b64encode(raw_json.encode("utf-8")).decode("ascii")
-    clean_base = (base_url or "").split("#")[0] if base_url else "https://raw.githack.com/The-Dicer/GOOOOL/master/webapp/calculator.html"
+    clean_base = (base_url or "").split("#")[0] if base_url else "https://the-dicer.github.io/GOOOOL/webapp/calculator.html"
     return f"{clean_base}#data={b64_data}"
 
 
@@ -442,7 +442,7 @@ def send_operator_dispatch(
     token = tg_cfg.get("bot_token", "")
     primary_chat_id = str(tg_cfg.get("chat_id", "")).strip()
     tg_send_file = tg_cfg.get("send_file", True)
-    webapp_url = tg_cfg.get("webapp_url", "https://raw.githack.com/The-Dicer/GOOOOL/master/webapp/calculator.html")
+    webapp_url = tg_cfg.get("webapp_url", "https://the-dicer.github.io/GOOOOL/webapp/calculator.html")
 
     if notifier is None:
         notifier = TelegramNotifier(token, primary_chat_id)
@@ -831,7 +831,7 @@ async def run_autopilot_check(test_mode: bool = False, force_all: bool = False) 
         target_chat_ids = [str(primary_chat_id).strip()]
 
     tg_send_file = tg_cfg.get("send_file", True)
-    webapp_url = tg_cfg.get("webapp_url", "https://raw.githack.com/The-Dicer/GOOOOL/master/webapp/calculator.html")
+    webapp_url = tg_cfg.get("webapp_url", "https://the-dicer.github.io/GOOOOL/webapp/calculator.html")
     notifier = TelegramNotifier(bot_token, primary_chat_id)
 
     stream_keys_dir = config.get("stream_keys_dir", "stream_keys")

@@ -21,7 +21,7 @@
         "bot_token": "",
         "chat_id": "",
         "send_file": true,
-        "webapp_url": "https://raw.githack.com/The-Dicer/GOOOOL/master/webapp/calculator.html"
+        "webapp_url": "https://the-dicer.github.io/GOOOOL/webapp/calculator.html"
     },
     "operators": [
         {
