@@ -23,6 +23,18 @@
         "send_file": true,
         "webapp_url": "https://raw.githack.com/The-Dicer/GOOOOL/master/webapp/calculator.html"
     },
+    "operators": [
+        {
+            "name": "Оператор 1 (Основной)",
+            "chat_id": "123456789",
+            "footballista_token": "Bearer eyJhbGciOi..."
+        },
+        {
+            "name": "Оператор 2",
+            "chat_id": "987654321",
+            "footballista_token": "Bearer eyJhbGciOi..."
+        }
+    ],
     "autopilot": {
         "enabled": false,
         "check_interval_minutes": 120,

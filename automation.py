@@ -82,6 +82,42 @@ class TelegramNotifier:
             logger.warning(f"Не удалось получить chat_id из Telegram: {e}")
             return None
 
+    def get_recent_chats(self) -> List[Dict[str, Any]]:
+        """
+        Возвращает список всех уникальных пользователей/чатов, писавших боту последнее время.
+        Формат элементов: {"chat_id": "...", "name": "...", "username": "...", "date": ...}
+        """
+        if not self.is_configured():
+            return []
+        try:
+            url = f"{self.base_url}/getUpdates"
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            if not data.get("ok"):
+                return []
+
+            results = data.get("result", [])
+            seen_chats = {}
+            for update in results:
+                msg = update.get("message") or update.get("channel_post") or update.get("my_chat_member")
+                if msg and "chat" in msg and "id" in msg["chat"]:
+                    cid = str(msg["chat"]["id"])
+                    c_title = msg["chat"].get("title")
+                    first_name = msg["chat"].get("first_name", "")
+                    last_name = msg["chat"].get("last_name", "")
+                    full_name = (f"{first_name} {last_name}").strip() or c_title or "Без имени"
+                    username = msg["chat"].get("username", "")
+                    seen_chats[cid] = {
+                        "chat_id": cid,
+                        "name": full_name,
+                        "username": f"@{username}" if username else "",
+                        "date": msg.get("date", 0)
+                    }
+            return list(seen_chats.values())
+        except Exception as e:
+            logger.warning(f"Не удалось получить список чатов Telegram: {e}")
+            return []
+
     def send_message(self, text: str, chat_id: Optional[str] = None, reply_markup: Optional[Dict[str, Any]] = None) -> bool:
         """Отправка текстового сообщения в чат (с опциональными inline-кнопками/WebApp)."""
         target_chat = chat_id or self.default_chat_id
@@ -382,10 +418,13 @@ def send_custom_period_report(
 
     tg_cfg = cfg.get("telegram", {})
     token = tg_cfg.get("bot_token", "")
-    chat_id = tg_cfg.get("chat_id", "")
-    webapp_url = tg_cfg.get("webapp_url", "https://raw.githack.com/The-Dicer/GOOOOL/master/webapp/calculator.html")
+    primary_chat_id = tg_cfg.get("chat_id", "")
+    operators = cfg.get("operators", [])
+    target_chats = [str(op["chat_id"]).strip() for op in operators if op.get("chat_id")]
+    if not target_chats and primary_chat_id:
+        target_chats = [str(primary_chat_id).strip()]
 
-    if not token or not chat_id:
+    if not token or not target_chats:
         return False, "В config.json не указаны bot_token или chat_id для Telegram."
 
     # Если список матчей не передан, ищем подходящие в базе обработанных
@@ -450,9 +489,13 @@ def send_custom_period_report(
         ]
     }
 
-    ok = notifier.send_message("\n".join(text_lines), reply_markup=reply_markup)
-    if ok:
-        return True, f"Отчет за период {dates_str} успешно отправлен в Telegram!"
+    any_ok = False
+    for cid in target_chats:
+        if notifier.send_message("\n".join(text_lines), chat_id=cid, reply_markup=reply_markup):
+            any_ok = True
+
+    if any_ok:
+        return True, f"Отчет за период {dates_str} успешно отправлен в Telegram ({len(target_chats)} чат(ов))!"
     else:
         return False, "Сбой отправки сообщения в Telegram API."
 
@@ -592,10 +635,15 @@ async def run_autopilot_check(test_mode: bool = False, force_all: bool = False) 
 
     tg_cfg = config.get("telegram", {})
     bot_token = tg_cfg.get("bot_token", "")
-    chat_id = tg_cfg.get("chat_id", "")
+    primary_chat_id = tg_cfg.get("chat_id", "")
+    operators = config.get("operators", [])
+    target_chat_ids = [str(op["chat_id"]).strip() for op in operators if op.get("chat_id")]
+    if not target_chat_ids and primary_chat_id:
+        target_chat_ids = [str(primary_chat_id).strip()]
+
     tg_send_file = tg_cfg.get("send_file", True)
     webapp_url = tg_cfg.get("webapp_url", "https://raw.githack.com/The-Dicer/GOOOOL/master/webapp/calculator.html")
-    notifier = TelegramNotifier(bot_token, chat_id)
+    notifier = TelegramNotifier(bot_token, primary_chat_id)
 
     stream_keys_dir = config.get("stream_keys_dir", "stream_keys")
     stadium_colors = config.get("stadium_colors", {})
@@ -630,8 +678,9 @@ async def run_autopilot_check(test_mode: bool = False, force_all: bool = False) 
     if not ready:
         msg = "Ошибка: не удалось запустить Chrome для работы автопилота."
         logger.error(msg)
-        if notifier.is_configured() and chat_id:
-            notifier.send_message(f"<b>GOAL Автопилот:</b> {msg}")
+        if notifier.is_configured() and target_chat_ids:
+            for cid in target_chat_ids:
+                notifier.send_message(f"<b>GOAL Автопилот:</b> {msg}", chat_id=cid)
         return {"status": "chrome_error", "message": msg}
 
     # 4. Сбор матчей
@@ -660,11 +709,13 @@ async def run_autopilot_check(test_mode: bool = False, force_all: bool = False) 
     if new_matches:
         logger.info(f"Найдено {len(new_matches)} новых матчей. Начинаем создание трансляций...")
 
-        if notifier.is_configured() and chat_id:
-            notifier.send_message(
-                f"<b>GOAL Автопилот:</b> Обнаружено новых матчей: <b>{len(new_matches)}</b>.\n"
-                f"Запускаю создание трансляций и генерацию обложек..."
-            )
+        if notifier.is_configured() and target_chat_ids:
+            for cid in target_chat_ids:
+                notifier.send_message(
+                    f"<b>GOAL Автопилот:</b> Обнаружено новых матчей: <b>{len(new_matches)}</b>.\n"
+                    f"Запускаю создание трансляций и генерацию обложек...",
+                    chat_id=cid
+                )
 
         success_count, keys_file, results = await process_selected_matches(
             selected_matches=new_matches,
@@ -715,11 +766,12 @@ async def run_autopilot_check(test_mode: bool = False, force_all: bool = False) 
             ]
         }
 
-        if notifier.is_configured() and chat_id:
-            notifier.send_message(report_text, reply_markup=reply_markup)
-            if tg_send_file and keys_file and os.path.exists(keys_file):
-                caption = f"Ключи трансляций ({datetime.datetime.now().strftime('%d.%m.%Y')})"
-                notifier.send_document(keys_file, caption=caption)
+        if notifier.is_configured() and target_chat_ids:
+            for cid in target_chat_ids:
+                notifier.send_message(report_text, chat_id=cid, reply_markup=reply_markup)
+                if tg_send_file and keys_file and os.path.exists(keys_file):
+                    caption = f"Ключи трансляций ({datetime.datetime.now().strftime('%d.%m.%Y')})"
+                    notifier.send_document(keys_file, caption=caption, chat_id=cid)
     else:
         logger.info(f"Все матчи ({len(all_matches)} шт.) уже имеют готовые трансляции. Новых игр нет.")
 

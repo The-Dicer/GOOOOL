@@ -125,7 +125,7 @@ async def process_selected_matches(selected_matches, pattern_mode="Автовы�
                     else:
                         if video_url and match.match_url:
                             logger.info(f"БОЕВОЙ РЕЖИМ: Вставляем видео {video_url} на сайт Footballista...")
-                            await add_video_link_to_match(context, match.match_url, video_url)
+                            await add_video_link_to_match(context, match.match_url, video_url, operator_token=match.operator_token)
                         else:
                             logger.warning("Пропуск вставки: Rutube не вернул ссылку или у матча нет URL.")
 

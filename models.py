@@ -17,6 +17,9 @@ class MatchMetadata(BaseModel):
     abbr_home: str = Field("", description="Сокращение хозяев")
     abbr_away: str = Field("", description="Сокращение гостей")
     has_video: bool = Field(False, description="Прикреплена ли уже трансляция к матчу")
+    operator_name: Optional[str] = Field(None, description="Имя назначенного оператора")
+    operator_token: Optional[str] = Field(None, description="Токен оператора для API Footballista")
+    operator_chat_id: Optional[str] = Field(None, description="Telegram Chat ID оператора")
 
     @property
     def stream_title(self) -> str:

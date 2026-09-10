@@ -174,6 +174,8 @@ class AFLPublisherApp(ctk.CTk):
             self.autopilot_enabled_var.set(ap.get("enabled", False))
             self.autopilot_interval_var.set(str(ap.get("check_interval_minutes", 30)))
             self.autopilot_friday_only_var.set("Friday" in ap.get("active_days", ["Friday", "Saturday"]))
+            # Операторы
+            self.operators = config.get("operators", [])
 
         except Exception as e:
             logging.error(f"Не удалось загрузить {CONFIG_FILE}: {e}")
@@ -181,6 +183,15 @@ class AFLPublisherApp(ctk.CTk):
     def save_config(self):
         if hasattr(self, "textbox_desc") and self.textbox_desc.winfo_exists():
             self.rutube_description_text = self.textbox_desc.get("1.0", tk.END).strip()
+
+        current_operators = getattr(self, "operators", [])
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                    file_cfg = json.load(f)
+                    current_operators = file_cfg.get("operators", current_operators)
+            except Exception:
+                pass
 
         config_data = {
             "rutube_description": self.rutube_description_text,
@@ -193,6 +204,7 @@ class AFLPublisherApp(ctk.CTk):
                 "chat_id": self.tg_chat_id_var.get().strip(),
                 "send_file": self.tg_send_file_var.get()
             },
+            "operators": current_operators,
             "autopilot": {
                 "enabled": self.autopilot_enabled_var.get(),
                 "check_interval_minutes": int(self.autopilot_interval_var.get() or 30),
@@ -488,7 +500,16 @@ class AFLPublisherApp(ctk.CTk):
         btn_test_tg.pack(side="left")
 
         cb_send_file = ctk.CTkCheckBox(sec2, text="Прикреплять файл stream_keys.txt к отчету в Telegram", variable=self.tg_send_file_var, font=("Arial", 13))
-        cb_send_file.pack(anchor="w", padx=15, pady=(0, 15))
+        cb_send_file.pack(anchor="w", padx=15, pady=(0, 12))
+
+        # Блок управления операторами (Footballista + Telegram)
+        row_ops = ctk.CTkFrame(sec2, fg_color="#1E1E1E", corner_radius=6)
+        row_ops.pack(fill="x", padx=15, pady=(0, 15))
+        self.lbl_operators_count = ctk.CTkLabel(row_ops, text="Операторы: Загрузка...", font=("Arial", 13))
+        self.lbl_operators_count.pack(side="left", padx=15, pady=8)
+        btn_open_wizard = ctk.CTkButton(row_ops, text="Управление операторами...", width=200, fg_color="#1976D2", hover_color="#1565C0", command=self.open_operator_wizard)
+        btn_open_wizard.pack(side="right", padx=15, pady=6)
+        self.update_operators_label()
 
         # 3. АВТОПИЛОТ В ПРИЛОЖЕНИИ
         sec3 = ctk.CTkFrame(scroll, fg_color="#2B2B2B", corner_radius=8)
@@ -594,6 +615,30 @@ class AFLPublisherApp(ctk.CTk):
             messagebox.showinfo("Telegram", "Тестовое сообщение успешно доставлено в Telegram.")
         else:
             messagebox.showerror("Telegram", "Не удалось отправить сообщение. Проверьте правильность токена и Chat ID.")
+
+    def update_operators_label(self):
+        try:
+            ops = []
+            if os.path.exists(CONFIG_FILE):
+                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    ops = cfg.get("operators", [])
+            self.operators = ops
+            if hasattr(self, "lbl_operators_count"):
+                self.lbl_operators_count.configure(text=f"Операторы: {len(ops)} подключено")
+        except Exception:
+            pass
+
+    def open_operator_wizard(self):
+        try:
+            script_path = os.path.abspath(os.path.join(os.getcwd(), "scripts", "add_operator.py"))
+            if sys.platform == "win32":
+                cmd = f'start cmd /k "{sys.executable}" "{script_path}"'
+                subprocess.Popen(cmd, shell=True)
+            else:
+                subprocess.Popen([sys.executable, script_path])
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось запустить мастер операторов: {e}")
 
     def install_windows_task(self):
         self.save_config()

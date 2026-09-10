@@ -4,7 +4,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-async def add_video_link_to_match(context, match_url: str, video_url: str) -> None:
+async def add_video_link_to_match(context, match_url: str, video_url: str, operator_token: Optional[str] = None) -> None:
     """
     Прикрепление ссылки на трансляцию через прямой Footballista REST API:
     POST https://footballista.ru/api/games/{gameId}/set_videos
@@ -32,34 +32,37 @@ async def add_video_link_to_match(context, match_url: str, video_url: str) -> No
         await page.wait_for_load_state("domcontentloaded")
         await page.wait_for_timeout(1000)
 
-    api_script = """async ({ gameId, videoUrl }) => {
-        async function getIonicToken() {
-            return new Promise((resolve) => {
-                if (!window.indexedDB) return resolve(null);
-                const req = indexedDB.open('_ionicstorage');
-                req.onsuccess = (e) => {
-                    const db = e.target.result;
-                    if (!db.objectStoreNames.contains('_ionickv')) return resolve(null);
-                    const tx = db.transaction('_ionickv', 'readonly');
-                    const store = tx.objectStore('_ionickv');
-                    const getReq = store.get('token');
-                    getReq.onsuccess = () => {
-                        const val = getReq.result;
-                        if (val) return resolve(val.startsWith('Bearer ') ? val : `Bearer ${val}`);
-                        resolve(null);
-                    };
-                    getReq.onerror = () => resolve(null);
-                };
-                req.onerror = () => resolve(null);
-            });
-        }
-
-        let token = await getIonicToken();
+    api_script = """async ({ gameId, videoUrl, customToken }) => {
+        let token = customToken;
         if (!token) {
-            for (let i = 0; i < localStorage.length; i++) {
-                const k = localStorage.key(i);
-                const v = localStorage.getItem(k);
-                if (v && v.startsWith('eyJ')) { token = `Bearer ${v}`; break; }
+            async function getIonicToken() {
+                return new Promise((resolve) => {
+                    if (!window.indexedDB) return resolve(null);
+                    const req = indexedDB.open('_ionicstorage');
+                    req.onsuccess = (e) => {
+                        const db = e.target.result;
+                        if (!db.objectStoreNames.contains('_ionickv')) return resolve(null);
+                        const tx = db.transaction('_ionickv', 'readonly');
+                        const store = tx.objectStore('_ionickv');
+                        const getReq = store.get('token');
+                        getReq.onsuccess = () => {
+                            const val = getReq.result;
+                            if (val) return resolve(val.startsWith('Bearer ') ? val : `Bearer ${val}`);
+                            resolve(null);
+                        };
+                        getReq.onerror = () => resolve(null);
+                    };
+                    req.onerror = () => resolve(null);
+                });
+            }
+
+            token = await getIonicToken();
+            if (!token) {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    const v = localStorage.getItem(k);
+                    if (v && v.startsWith('eyJ')) { token = `Bearer ${v}`; break; }
+                }
             }
         }
 
@@ -67,10 +70,13 @@ async def add_video_link_to_match(context, match_url: str, video_url: str) -> No
             return { error: 'Токен авторизации Footballista не найден в браузере' };
         }
 
+        let cleanToken = typeof token === 'string' ? token.replace(/^["']+|["']+$/g, '').trim() : String(token);
+        const authHeader = cleanToken.startsWith('Bearer ') ? cleanToken : `Bearer ${cleanToken}`;
+
         const headers = {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
-            'Authorization': token
+            'Authorization': authHeader
         };
 
         // 1. Получаем актуальный объект игры
@@ -115,7 +121,7 @@ async def add_video_link_to_match(context, match_url: str, video_url: str) -> No
         return { success: true };
     }"""
 
-    res = await page.evaluate(api_script, {"gameId": match_id, "videoUrl": video_url})
+    res = await page.evaluate(api_script, {"gameId": match_id, "videoUrl": video_url, "customToken": operator_token or ""})
     if res and res.get("error"):
         raise RuntimeError(f"Ошибка прикрепления видео: {res.get('error')}")
 
