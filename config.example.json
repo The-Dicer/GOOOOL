@@ -1,0 +1,36 @@
+{
+    "rutube_description": "Заявляйся в AFL!\n\n+7 (916) 739-96-23\nhttps://vk.com/lkuka\n\nТелеграм AFL — https://t.me/aflrussiа\n\nAFL VK – https://vk.com/aflmoscow\n\nInstagram* AFL – платформа запрещена на территории РФ https://instagram.com/afl_russia\n\nПриложение AFL:\n\nIphone — https://apps.apple.com/ru/app/afl/id1555695558\n\nAndroid — https://play.google.com/store/apps/details?id=com.foo",
+    "rutube_channel_id": "77095292",
+    "stadium_colors": {
+        "труд": "3",
+        "ясенево": "24",
+        "терехово": "19",
+        "конструктор": "13",
+        "дело спорта": "13",
+        "тушино": "4",
+        "октябрь": "4",
+        "братиславский": "5",
+        "торпедо": "22",
+        "олимпийская": "9",
+        "красносельская": "11",
+        "балашиха": "15"
+    },
+    "stream_keys_dir": "stream_keys",
+    "telegram": {
+        "enabled": true,
+        "bot_token": "",
+        "chat_id": "",
+        "send_file": true,
+        "webapp_url": "https://raw.githack.com/The-Dicer/GOOOOL/master/webapp/calculator.html"
+    },
+    "autopilot": {
+        "enabled": false,
+        "check_interval_minutes": 120,
+        "start_hour": "12:00",
+        "active_days": [
+            "Friday",
+            "Saturday"
+        ],
+        "close_chrome_after": false
+    }
+}

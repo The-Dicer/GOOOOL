@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -20,8 +20,14 @@ dist/
 # Project runtime & generated files
 chrome_debug_profile/
 covers/
+stream_keys/
 stream_keys*.txt
+logs/
 *.log
+processed_matches.json
+task_schedule.xml
+**/task_schedule.xml
+config.json
 
 # Temp dumps
 games_comparison.json

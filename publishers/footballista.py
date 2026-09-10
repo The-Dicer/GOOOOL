@@ -127,4 +127,4 @@ async def add_video_link_to_match(context, match_url: str, video_url: str) -> No
             except Exception:
                 pass
 
-    logger.info(f"✅ Видео успешно прикреплено к матчу {match_id} на Footballista!")
+    logger.info(f"Видео успешно прикреплено к матчу {match_id} на Footballista.")

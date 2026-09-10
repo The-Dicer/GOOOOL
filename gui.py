@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
+from tkinter import filedialog, messagebox
 import threading
 import asyncio
 import logging
@@ -7,8 +8,37 @@ import subprocess
 import os
 import urllib.request
 import json
+import datetime
+
+# Исключаем локальные адреса из системного прокси, чтобы Playwright не слал локальный CDP трафик в прокси
+for _proxy_key in ["NO_PROXY", "no_proxy"]:
+    _curr = os.environ.get(_proxy_key, "")
+    _proxies = [p.strip() for p in _curr.split(",") if p.strip()]
+    for _h in ["localhost", "127.0.0.1", "::1"]:
+        if _h not in _proxies:
+            _proxies.append(_h)
+    os.environ[_proxy_key] = ",".join(_proxies)
 
 from main import fetch_matches_for_ui, process_selected_matches
+from automation import (
+    TelegramNotifier,
+    run_autopilot_check,
+    load_processed_matches,
+    record_processed_matches,
+    is_match_already_processed,
+    get_current_weekend_window,
+    is_weekend_completed,
+    reset_weekend_status,
+    send_custom_period_report,
+    parse_match_date
+)
+try:
+    from scripts.install_scheduler_task import install_task, remove_task
+except ImportError:
+    try:
+        from install_scheduler_task import install_task, remove_task
+    except ImportError:
+        install_task, remove_task = None, None
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -48,7 +78,7 @@ def launch_chrome():
             chrome_path = r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
         profile_path = os.path.join(os.getcwd(), "chrome_debug_profile")
         os.makedirs(profile_path, exist_ok=True)
-        subprocess.Popen([chrome_path, "--remote-debugging-port=9222", f"--user-data-dir={profile_path}"])
+        subprocess.Popen([chrome_path, "--remote-debugging-port=9222", "--remote-allow-origins=*", f"--user-data-dir={profile_path}"])
         logging.info("Chrome запущен. Авторизуйтесь на нужных сайтах.")
     except Exception as e:
         logging.error(f"Не удалось запустить Chrome: {e}")
@@ -57,12 +87,15 @@ def launch_chrome():
 class AFLPublisherApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("GOAL 3.0")
-        self.geometry("1150x820")
-        try:
-            self.iconbitmap("icon.ico")
-        except Exception:
-            pass
+        self.title("GOAL 3.2")
+        self.geometry("1180x840")
+        for icon_path in ["assets/icon.ico", "icon.ico"]:
+            if os.path.exists(icon_path):
+                try:
+                    self.iconbitmap(icon_path)
+                    break
+                except Exception:
+                    pass
 
         self.pipeline_task = None
         self.checkbox_vars = []
@@ -77,9 +110,24 @@ class AFLPublisherApp(ctk.CTk):
         self.stadium_colors = {}
         self.last_browser_state = None
 
+        # Настройки папки ключей и Telegram
+        self.stream_keys_dir_var = ctk.StringVar(value="stream_keys")
+        self.tg_bot_token_var = ctk.StringVar(value="8780587668:AAEm_d4JqgggAySYl9g7GsNCdItsWpe7wPA")
+        self.tg_chat_id_var = ctk.StringVar(value="")
+        self.tg_send_file_var = ctk.BooleanVar(value=True)
+        self.rutube_channel_id_var = ctk.StringVar(value="77095292")
+
+        # Автопилот внутри GUI
+        self.autopilot_enabled_var = ctk.BooleanVar(value=False)
+        self.autopilot_interval_var = ctk.StringVar(value="120")
+        self.autopilot_friday_only_var = ctk.BooleanVar(value=True)
+        self.autopilot_next_check = None
+        self.autopilot_running = False
+
         self.load_config()
         self.build_ui()
         self.check_browser_status()
+        self.check_autopilot_tick()
 
     def load_config(self):
         default_desc =  "Заявляйся в AFL!\n\n+7 (916) 739-96-23\nhttps://vk.com/lkuka\n\nТелеграм AFL — https://t.me/aflrussiа\n\nAFL VK – https://vk.com/aflmoscow\n\nInstagram* AFL – платформа запрещена на территории РФ https://instagram.com/afl_russia\n\nПриложение AFL:\n\nIphone — https://apps.apple.com/ru/app/afl/id1555695558\n\nAndroid — https://play.google.com/store/apps/details?id=com.foo"
@@ -108,6 +156,25 @@ class AFLPublisherApp(ctk.CTk):
                 config = json.load(f)
             self.rutube_description_text = config.get("rutube_description", default_desc)
             self.stadium_colors = config.get("stadium_colors", default_stadiums)
+
+            # Папка ключей
+            self.stream_keys_dir_var.set(config.get("stream_keys_dir", "stream_keys"))
+
+            # Telegram
+            tg = config.get("telegram", {})
+            self.tg_bot_token_var.set(tg.get("bot_token", "8780587668:AAEm_d4JqgggAySYl9g7GsNCdItsWpe7wPA"))
+            self.tg_chat_id_var.set(tg.get("chat_id", ""))
+            self.tg_send_file_var.set(tg.get("send_file", True))
+
+            # Rutube канал лиги (ID)
+            self.rutube_channel_id_var.set(config.get("rutube_channel_id", "77095292"))
+
+            # Автопилот
+            ap = config.get("autopilot", {})
+            self.autopilot_enabled_var.set(ap.get("enabled", False))
+            self.autopilot_interval_var.set(str(ap.get("check_interval_minutes", 30)))
+            self.autopilot_friday_only_var.set("Friday" in ap.get("active_days", ["Friday", "Saturday"]))
+
         except Exception as e:
             logging.error(f"Не удалось загрузить {CONFIG_FILE}: {e}")
 
@@ -117,7 +184,21 @@ class AFLPublisherApp(ctk.CTk):
 
         config_data = {
             "rutube_description": self.rutube_description_text,
-            "stadium_colors": self.stadium_colors
+            "rutube_channel_id": self.rutube_channel_id_var.get().strip() or "77095292",
+            "stadium_colors": self.stadium_colors,
+            "stream_keys_dir": self.stream_keys_dir_var.get().strip() or "stream_keys",
+            "telegram": {
+                "enabled": bool(self.tg_bot_token_var.get().strip()),
+                "bot_token": self.tg_bot_token_var.get().strip(),
+                "chat_id": self.tg_chat_id_var.get().strip(),
+                "send_file": self.tg_send_file_var.get()
+            },
+            "autopilot": {
+                "enabled": self.autopilot_enabled_var.get(),
+                "check_interval_minutes": int(self.autopilot_interval_var.get() or 30),
+                "active_days": ["Friday", "Saturday"] if self.autopilot_friday_only_var.get() else [],
+                "close_chrome_after": False
+            }
         }
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -203,15 +284,26 @@ class AFLPublisherApp(ctk.CTk):
                                       state="disabled", command=self.stop_automation)
         self.btn_stop.pack(padx=20, fill="x")
 
+        self.btn_custom_report = ctk.CTkButton(
+            action_frame,
+            text="Отчет за период (Failsafe)",
+            fg_color="#1E3A5F",
+            hover_color="#152A45",
+            height=36,
+            command=self.open_custom_report_dialog
+        )
+        self.btn_custom_report.pack(pady=(12, 0), padx=20, fill="x")
+
         # === ПРАВАЯ ЧАСТЬ (ВКЛАДКИ) ===
         self.tabview = ctk.CTkTabview(self)
         self.tabview.grid(row=0, column=1, sticky="nsew", padx=15, pady=15)
 
-        # Создаем ЧЕТЫРЕ вкладки
+        # Создаем ПЯТЬ вкладок
         self.tab_matches = self.tabview.add("Матчи")
+        self.tab_autopilot = self.tabview.add("Автопилот & TG")
         self.tab_settings = self.tabview.add("Настройки")
         self.tab_colors = self.tabview.add("Цвета стадионов")
-        self.tab_test = self.tabview.add("Дебаг")
+        self.tab_test = self.tabview.add("Параметры запуска")
 
         # --- ВКЛАДКА 1: МАТЧИ И ЛОГИ ---
         self.tab_matches.grid_columnconfigure(0, weight=1)
@@ -234,12 +326,12 @@ class AFLPublisherApp(ctk.CTk):
 
         ctk.CTkLabel(log_header_frame, text="Лог работы:", font=("Arial", 12, "bold")).pack(side="left")
 
-        self.btn_clear_logs = ctk.CTkButton(log_header_frame, text="🗑️ Очистить", width=80, height=24,
+        self.btn_clear_logs = ctk.CTkButton(log_header_frame, text="Очистить", width=80, height=24,
                                             font=("Arial", 11), fg_color="#444444", hover_color="#555555",
                                             command=self.clear_logs)
         self.btn_clear_logs.pack(side="right", padx=(5, 0))
 
-        self.btn_copy_logs = ctk.CTkButton(log_header_frame, text="📋 Скопировать логи", width=140, height=24,
+        self.btn_copy_logs = ctk.CTkButton(log_header_frame, text="Скопировать логи", width=140, height=24,
                                            font=("Arial", 11), fg_color="#1F6AA5", hover_color="#144870",
                                            command=self.copy_logs_to_clipboard)
         self.btn_copy_logs.pack(side="right", padx=(5, 0))
@@ -323,28 +415,31 @@ class AFLPublisherApp(ctk.CTk):
         self.colors_scroll.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         self.refresh_colors_list()
 
-        # --- ВКЛАДКА 4: ТЕСТОВЫЙ РЕЖИМ ---
+        # --- ВКЛАДКА 4: ПАРАМЕТРЫ ЗАПУСКА ---
         test_frame = ctk.CTkFrame(self.tab_test, fg_color="transparent")
         test_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-        ctk.CTkLabel(test_frame, text="Инструменты отладки и тестирования", font=("Arial", 18, "bold")).pack(
+        ctk.CTkLabel(test_frame, text="Параметры публикации и выборки матчей", font=("Arial", 18, "bold")).pack(
             pady=(10, 30), anchor="w")
 
         self.switch_test = ctk.CTkSwitch(test_frame,
-                                         text="Тестовый режим (без публикации видео на сайте Footballista)",
+                                         text="Автономный запуск (генерация ключей без привязки к Footballista)",
                                          variable=self.test_mode_var, onvalue=True, offvalue=False,
                                          font=("Arial", 14))
         self.switch_test.pack(pady=15, anchor="w")
 
         self.switch_debug = ctk.CTkSwitch(test_frame,
-                                          text="Дебаг-режим: собрать ровно 30 последних матчей (игнорировать проверку даты)",
+                                          text="Расширенная выборка (загрузка всех туров без фильтра по дате)",
                                           variable=self.debug_30_var, onvalue=True, offvalue=False,
                                           font=("Arial", 14))
         self.switch_debug.pack(pady=25, anchor="w")
 
         ctk.CTkLabel(test_frame,
-                     text="* Включение дебаг-режима полезно для проверки парсера на старых матчах, \nкогда на текущей неделе нет актуального расписания.",
+                     text="* Расширенная выборка позволяет загрузить матчи из всех доступных туров лиги,\nдаже если на ближайшие выходные расписание еще не опубликовано.",
                      text_color="gray", font=("Arial", 12), justify="left").pack(pady=10, anchor="w")
+
+        # --- ВКЛАДКА 5: АВТОПИЛОТ И TELEGRAM ---
+        self.build_autopilot_tab()
 
         # Настройка логгера
         ui_handler = TextHandler(self.log_console)
@@ -352,6 +447,367 @@ class AFLPublisherApp(ctk.CTk):
         logging.getLogger().addHandler(ui_handler)
         logging.getLogger().setLevel(logging.INFO)
         logging.getLogger("asyncio").setLevel(logging.WARNING)
+
+    def build_autopilot_tab(self):
+        scroll = ctk.CTkScrollableFrame(self.tab_autopilot, fg_color="transparent")
+        scroll.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # 1. ПАПКА СО СТРИМ-КЛЮЧАМИ
+        sec1 = ctk.CTkFrame(scroll, fg_color="#2B2B2B", corner_radius=8)
+        sec1.pack(fill="x", pady=(0, 15), padx=5)
+        ctk.CTkLabel(sec1, text="Папка для сохранения стрим-ключей", font=("Arial", 15, "bold")).pack(anchor="w", padx=15, pady=(12, 4))
+        ctk.CTkLabel(sec1, text="Сюда сохраняются файлы stream_keys с датой и туром", font=("Arial", 12), text_color="gray").pack(anchor="w", padx=15, pady=(0, 8))
+
+        row_dir = ctk.CTkFrame(sec1, fg_color="transparent")
+        row_dir.pack(fill="x", padx=15, pady=(0, 15))
+        self.entry_keys_dir = ctk.CTkEntry(row_dir, textvariable=self.stream_keys_dir_var, font=("Arial", 13))
+        self.entry_keys_dir.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        btn_browse = ctk.CTkButton(row_dir, text="Выбрать...", width=90, command=self.browse_keys_dir)
+        btn_browse.pack(side="left", padx=(0, 5))
+        btn_open = ctk.CTkButton(row_dir, text="Открыть", width=90, fg_color="#37474F", hover_color="#455A64", command=self.open_keys_dir)
+        btn_open.pack(side="left")
+
+        # 2. НАСТРОЙКИ TELEGRAM
+        sec2 = ctk.CTkFrame(scroll, fg_color="#2B2B2B", corner_radius=8)
+        sec2.pack(fill="x", pady=(0, 15), padx=5)
+        ctk.CTkLabel(sec2, text="Оповещения в Telegram", font=("Arial", 15, "bold")).pack(anchor="w", padx=15, pady=(12, 4))
+        ctk.CTkLabel(sec2, text="Бот присылает отчет со ссылками на Rutube и готовый файл ключей прямо в чат", font=("Arial", 12), text_color="gray").pack(anchor="w", padx=15, pady=(0, 8))
+
+        ctk.CTkLabel(sec2, text="Токен бота (@BotFather):", font=("Arial", 13, "bold")).pack(anchor="w", padx=15, pady=(4, 2))
+        self.entry_tg_token = ctk.CTkEntry(sec2, textvariable=self.tg_bot_token_var, font=("Arial", 13))
+        self.entry_tg_token.pack(fill="x", padx=15, pady=(0, 10))
+
+        ctk.CTkLabel(sec2, text="Chat ID (ваш личный ID или ID группы):", font=("Arial", 13, "bold")).pack(anchor="w", padx=15, pady=(4, 2))
+        row_tg_chat = ctk.CTkFrame(sec2, fg_color="transparent")
+        row_tg_chat.pack(fill="x", padx=15, pady=(0, 10))
+        self.entry_tg_chat = ctk.CTkEntry(row_tg_chat, textvariable=self.tg_chat_id_var, font=("Arial", 13), placeholder_text="Например: 123456789 или -100123456789")
+        self.entry_tg_chat.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        btn_detect_id = ctk.CTkButton(row_tg_chat, text="Найти Chat ID", width=120, command=self.auto_detect_chat_id)
+        btn_detect_id.pack(side="left", padx=(0, 5))
+        btn_test_tg = ctk.CTkButton(row_tg_chat, text="Тест", width=80, fg_color="#1976D2", hover_color="#1565C0", command=self.test_telegram)
+        btn_test_tg.pack(side="left")
+
+        cb_send_file = ctk.CTkCheckBox(sec2, text="Прикреплять файл stream_keys.txt к отчету в Telegram", variable=self.tg_send_file_var, font=("Arial", 13))
+        cb_send_file.pack(anchor="w", padx=15, pady=(0, 15))
+
+        # 3. АВТОПИЛОТ В ПРИЛОЖЕНИИ
+        sec3 = ctk.CTkFrame(scroll, fg_color="#2B2B2B", corner_radius=8)
+        sec3.pack(fill="x", pady=(0, 15), padx=5)
+        ctk.CTkLabel(sec3, text="Автопилот (мониторинг расписания в фоне)", font=("Arial", 15, "bold")).pack(anchor="w", padx=15, pady=(12, 4))
+        ctk.CTkLabel(sec3, text="Проверяет появление новых матчей на Footballista и сам делает трансляции", font=("Arial", 12), text_color="gray").pack(anchor="w", padx=15, pady=(0, 8))
+
+        row_ap_switch = ctk.CTkFrame(sec3, fg_color="transparent")
+        row_ap_switch.pack(fill="x", padx=15, pady=(0, 10))
+        self.switch_autopilot = ctk.CTkSwitch(row_ap_switch, text="Включить фоновый автопилот", variable=self.autopilot_enabled_var,
+                                              font=("Arial", 14, "bold"), command=self.toggle_autopilot)
+        self.switch_autopilot.pack(side="left")
+
+        self.cb_ap_friday = ctk.CTkCheckBox(sec3, text="Проверять только по пятницам и субботам", variable=self.autopilot_friday_only_var, font=("Arial", 13))
+        self.cb_ap_friday.pack(anchor="w", padx=15, pady=(0, 10))
+
+        row_interval = ctk.CTkFrame(sec3, fg_color="transparent")
+        row_interval.pack(fill="x", padx=15, pady=(0, 12))
+        ctk.CTkLabel(row_interval, text="Интервал проверки (минут):", font=("Arial", 13)).pack(side="left", padx=(0, 10))
+        ctk.CTkSegmentedButton(row_interval, variable=self.autopilot_interval_var, values=["15", "30", "60", "120"]).pack(side="left")
+
+        row_ap_status = ctk.CTkFrame(sec3, fg_color="#222222", corner_radius=6)
+        row_ap_status.pack(fill="x", padx=15, pady=(0, 10))
+        self.lbl_ap_status = ctk.CTkLabel(row_ap_status, text="Статус: Выключен", font=("Arial", 13, "bold"), text_color="gray")
+        self.lbl_ap_status.pack(side="left", padx=15, pady=10)
+
+        btn_run_now = ctk.CTkButton(row_ap_status, text="Проверить сейчас", fg_color="#F57C00", hover_color="#E65100", command=self.trigger_autopilot_now)
+        btn_run_now.pack(side="right", padx=15, pady=8)
+
+        # Статус текущих выходных (Пт, Сб, Вс)
+        row_weekend_status = ctk.CTkFrame(sec3, fg_color="#1E1E1E", corner_radius=6)
+        row_weekend_status.pack(fill="x", padx=15, pady=(0, 15))
+        self.lbl_weekend_status = ctk.CTkLabel(row_weekend_status, text="Выходные: Загрузка...", font=("Arial", 12))
+        self.lbl_weekend_status.pack(side="left", padx=15, pady=8)
+        btn_reset_wk = ctk.CTkButton(row_weekend_status, text="Сбросить статус выходных", width=190, height=28,
+                                     fg_color="#37474F", hover_color="#455A64", command=self.reset_weekend_clicked)
+        btn_reset_wk.pack(side="right", padx=15, pady=6)
+        self.refresh_weekend_status()
+
+        # 4. ПЛАНИРОВЩИК WINDOWS (БЕЗ ОТКРЫТИЯ ПРОГРАММЫ)
+        sec4 = ctk.CTkFrame(scroll, fg_color="#2B2B2B", corner_radius=8)
+        sec4.pack(fill="x", pady=(0, 15), padx=5)
+        ctk.CTkLabel(sec4, text="Полная автономность: Планировщик Windows (Task Scheduler)", font=("Arial", 15, "bold")).pack(anchor="w", padx=15, pady=(12, 4))
+        ctk.CTkLabel(sec4, text="Windows сама по пятницам и субботам (с 12:00 каждые 2 ч) проверит расписание, создаст стримы и пришлет в TG.\nПрограмму можно вообще не открывать!", font=("Arial", 12), text_color="gray", justify="left").pack(anchor="w", padx=15, pady=(0, 10))
+
+        row_win_task = ctk.CTkFrame(sec4, fg_color="transparent")
+        row_win_task.pack(fill="x", padx=15, pady=(0, 15))
+        btn_install_task = ctk.CTkButton(row_win_task, text="Установить автозапуск (Пт и Сб с 12:00)", fg_color="#2E7D32", hover_color="#1B5E20", height=38, command=self.install_windows_task)
+        btn_install_task.pack(side="left", padx=(0, 10))
+        btn_remove_task = ctk.CTkButton(row_win_task, text="Удалить из Windows", fg_color="#D32F2F", hover_color="#C62828", height=38, command=self.remove_windows_task)
+        btn_remove_task.pack(side="left")
+
+        # 5. ОТЧЕТ ЗА ПРОИЗВОЛЬНЫЙ ПЕРИОД (FAILSAFE)
+        sec5 = ctk.CTkFrame(scroll, fg_color="#2B2B2B", corner_radius=8)
+        sec5.pack(fill="x", pady=(0, 15), padx=5)
+        ctk.CTkLabel(sec5, text="Экстренный отчет за произвольный период (Failsafe)", font=("Arial", 15, "bold")).pack(anchor="w", padx=15, pady=(12, 4))
+        ctk.CTkLabel(sec5, text="Если нужно рассчитать оплату за случайные даты, турнир или смену вне пятниц-воскресений", font=("Arial", 12), text_color="gray").pack(anchor="w", padx=15, pady=(0, 10))
+        btn_failsafe = ctk.CTkButton(sec5, text="Сформировать отчет за произвольный период...", fg_color="#1E3A5F", hover_color="#152A45", height=38, command=self.open_custom_report_dialog)
+        btn_failsafe.pack(fill="x", padx=15, pady=(0, 15))
+
+        # Кнопка сохранения
+        ctk.CTkButton(scroll, text="СОХРАНИТЬ ВСЕ НАСТРОЙКИ", font=("Arial", 14, "bold"), fg_color="#2E7D32", hover_color="#1B5E20", height=45, command=self.save_config).pack(fill="x", pady=(10, 20), padx=5)
+
+    def browse_keys_dir(self):
+        chosen = filedialog.askdirectory(initialdir=self.stream_keys_dir_var.get() or os.getcwd(), title="Выберите папку для сохранения ключей трансляций")
+        if chosen:
+            self.stream_keys_dir_var.set(chosen)
+            self.save_config()
+            logging.info(f"Выбрана папка для ключей: {chosen}")
+
+    def open_keys_dir(self):
+        path = os.path.abspath(self.stream_keys_dir_var.get() or "stream_keys")
+        os.makedirs(path, exist_ok=True)
+        try:
+            os.startfile(path)
+        except Exception as e:
+            logging.error(f"Не удалось открыть папку: {e}")
+
+    def auto_detect_chat_id(self):
+        token = self.tg_bot_token_var.get().strip()
+        if not token:
+            messagebox.showwarning("Telegram", "Сначала укажите токен бота!")
+            return
+        notifier = TelegramNotifier(token)
+        cid = notifier.get_last_chat_id()
+        if cid:
+            self.tg_chat_id_var.set(cid)
+            self.save_config()
+            messagebox.showinfo("Telegram", f"Chat ID найден: {cid}\nНастройки сохранены!")
+            logging.info(f"Chat ID автоматически обнаружен и сохранен: {cid}")
+        else:
+            messagebox.showinfo("Telegram", "Бот пока не видит входящих сообщений.\n\nОткройте бота в Telegram, отправьте ему /start или любое слово, и нажмите эту кнопку снова.")
+
+    def test_telegram(self):
+        token = self.tg_bot_token_var.get().strip()
+        cid = self.tg_chat_id_var.get().strip()
+        if not token or not cid:
+            messagebox.showwarning("Telegram", "Укажите токен бота и Chat ID!")
+            return
+        notifier = TelegramNotifier(token, cid)
+        ok = notifier.send_message("<b>Тест из GOAL 3.2</b>\n\nИнтеграция с Telegram успешно работает.")
+        if ok:
+            messagebox.showinfo("Telegram", "Тестовое сообщение успешно доставлено в Telegram.")
+        else:
+            messagebox.showerror("Telegram", "Не удалось отправить сообщение. Проверьте правильность токена и Chat ID.")
+
+    def install_windows_task(self):
+        self.save_config()
+        ok = install_task()
+        if ok:
+            messagebox.showinfo("Планировщик Windows", "Задача успешно зарегистрирована в Планировщике Windows!\n\nКаждую пятницу система будет автоматически проверять появление нового расписания и отправлять ключи в Telegram.")
+        else:
+            messagebox.showerror("Планировщик Windows", "Не удалось зарегистрировать задачу. Попробуйте запустить приложение от имени Администратора.")
+
+    def remove_windows_task(self):
+        ok = remove_task()
+        if ok:
+            messagebox.showinfo("Планировщик Windows", "Задача автопилота удалена из Планировщика Windows.")
+        else:
+            messagebox.showwarning("Планировщик Windows", "Задача не найдена или уже была удалена.")
+
+    def open_custom_report_dialog(self):
+        """Диалоговое окно формирования отчета за произвольный период (Failsafe)."""
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Отчет за произвольный период (Failsafe)")
+        dlg.geometry("480x420")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        today = datetime.datetime.now().date()
+        date_from_default = (today - datetime.timedelta(days=14)).strftime("%d.%m.%Y")
+        date_to_default = today.strftime("%d.%m.%Y")
+
+        ctk.CTkLabel(dlg, text="Отчет за произвольный период", font=("Arial", 16, "bold")).pack(pady=(18, 4))
+        ctk.CTkLabel(
+            dlg,
+            text="Сформирует Telegram-отчет и ссылку на калькулятор WebApp\nдля любого диапазона дат (включая нетипичные смены и турниры).",
+            font=("Arial", 11),
+            text_color="gray",
+            justify="center"
+        ).pack(pady=(0, 15))
+
+        f_dates = ctk.CTkFrame(dlg, fg_color="transparent")
+        f_dates.pack(fill="x", padx=25, pady=5)
+
+        ctk.CTkLabel(f_dates, text="С даты (ДД.ММ.ГГГГ):", font=("Arial", 12, "bold")).grid(row=0, column=0, sticky="w", pady=4)
+        entry_from = ctk.CTkEntry(f_dates, width=170)
+        entry_from.insert(0, date_from_default)
+        entry_from.grid(row=0, column=1, padx=(10, 0), pady=4)
+
+        ctk.CTkLabel(f_dates, text="По дату (ДД.ММ.ГГГГ):", font=("Arial", 12, "bold")).grid(row=1, column=0, sticky="w", pady=4)
+        entry_to = ctk.CTkEntry(f_dates, width=170)
+        entry_to.insert(0, date_to_default)
+        entry_to.grid(row=1, column=1, padx=(10, 0), pady=4)
+
+        use_selected_var = ctk.BooleanVar(value=False)
+        cb_use_selected = ctk.CTkCheckBox(
+            dlg,
+            text="Использовать только выбранные галочками матчи из таблицы",
+            variable=use_selected_var,
+            font=("Arial", 11)
+        )
+        cb_use_selected.pack(pady=(12, 10), padx=25, anchor="w")
+
+        lbl_status_msg = ctk.CTkLabel(dlg, text="", font=("Arial", 11))
+        lbl_status_msg.pack(pady=(0, 5))
+
+        def send_report():
+            df_str = entry_from.get().strip()
+            dt_str = entry_to.get().strip()
+            d_from = parse_match_date(df_str)
+            d_to = parse_match_date(dt_str)
+
+            if not d_from or not d_to:
+                messagebox.showwarning("Даты", "Укажите даты в корректном формате (например, 01.09.2026)!", parent=dlg)
+                return
+
+            if d_from > d_to:
+                d_from, d_to = d_to, d_from
+
+            custom_matches = None
+            if use_selected_var.get() and hasattr(self, "current_matches") and self.current_matches:
+                custom_matches = [
+                    self.current_matches[i]
+                    for i, var in enumerate(self.checkbox_vars)
+                    if var.get() and i < len(self.current_matches)
+                ]
+
+            lbl_status_msg.configure(text="Отправка отчета в Telegram...", text_color="orange")
+            dlg.update_idletasks()
+
+            ok, msg = send_custom_period_report(d_from, d_to, custom_matches)
+            if ok:
+                logging.info(f"{msg}")
+                messagebox.showinfo("Telegram", f"{msg}", parent=dlg)
+                dlg.destroy()
+            else:
+                lbl_status_msg.configure(text=f"{msg}", text_color="#E53935")
+                messagebox.showerror("Ошибка", msg, parent=dlg)
+
+        btn_send = ctk.CTkButton(
+            dlg,
+            text="Отправить отчет и калькулятор в Telegram",
+            font=("Arial", 13, "bold"),
+            fg_color="#1E88E5",
+            hover_color="#1565C0",
+            height=42,
+            command=send_report
+        )
+        btn_send.pack(fill="x", padx=25, pady=(5, 10))
+
+    def toggle_autopilot(self):
+        self.save_config()
+        if self.autopilot_enabled_var.get():
+            interval = int(self.autopilot_interval_var.get() or 30)
+            self.autopilot_next_check = datetime.datetime.now() + datetime.timedelta(minutes=interval)
+            self.lbl_ap_status.configure(
+                text=f"Активен (след. проверка: {self.autopilot_next_check.strftime('%H:%M:%S')})",
+                text_color="#00FF00"
+            )
+            logging.info(f"Фоновый автопилот включен. Интервал: {interval} мин.")
+        else:
+            self.autopilot_next_check = None
+            self.lbl_ap_status.configure(text="Статус: Выключен", text_color="gray")
+            logging.info("Фоновый автопилот выключен.")
+
+    def check_autopilot_tick(self):
+        if self.autopilot_enabled_var.get() and not self.autopilot_running:
+            now = datetime.datetime.now()
+            if self.autopilot_next_check is None:
+                interval = int(self.autopilot_interval_var.get() or 30)
+                self.autopilot_next_check = now + datetime.timedelta(minutes=interval)
+
+            if now >= self.autopilot_next_check:
+                today_name = now.strftime("%A")
+                if not self.autopilot_friday_only_var.get() or today_name in ["Friday", "Saturday"]:
+                    self.trigger_autopilot_now()
+                else:
+                    interval = int(self.autopilot_interval_var.get() or 30)
+                    self.autopilot_next_check = now + datetime.timedelta(minutes=interval)
+                    self.lbl_ap_status.configure(
+                        text=f"Пропуск ({today_name}, не пт/сб). След: {self.autopilot_next_check.strftime('%H:%M')}",
+                        text_color="orange"
+                    )
+
+            if self.autopilot_next_check and not self.autopilot_running:
+                diff = int((self.autopilot_next_check - now).total_seconds())
+                mins, secs = divmod(max(0, diff), 60)
+                self.lbl_ap_status.configure(
+                    text=f"Активен (до проверки {mins:02d}:{secs:02d})",
+                    text_color="#00FF00"
+                )
+
+        self.after(1000, self.check_autopilot_tick)
+
+    def trigger_autopilot_now(self):
+        if self.autopilot_running:
+            return
+        self.autopilot_running = True
+        self.lbl_ap_status.configure(text="Проверка расписания...", text_color="#FFD600")
+        logging.info("[Автопилот] Запуск проверки расписания...")
+
+        threading.Thread(target=self._run_async_autopilot, daemon=True).start()
+
+    def _run_async_autopilot(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            res = loop.run_until_complete(run_autopilot_check(test_mode=self.test_mode_var.get()))
+            status = res.get("status")
+            if status == "success":
+                txt = f"Создано {res.get('success_count')} трансляций."
+            elif status == "already_up_to_date":
+                txt = "Все матчи актуальны"
+            elif status == "no_matches":
+                txt = "Матчей в расписании пока нет"
+            else:
+                txt = f"{res.get('message', status)}"
+            logging.info(f"Результат автопилота: {txt}")
+        except Exception as e:
+            logging.error(f"Сбой в работе автопилота: {e}")
+            txt = f"Ошибка: {e}"
+        finally:
+            loop.close()
+            interval = int(self.autopilot_interval_var.get() or 30)
+            self.autopilot_next_check = datetime.datetime.now() + datetime.timedelta(minutes=interval)
+            self.autopilot_running = False
+            self.after(0, lambda: self.lbl_ap_status.configure(text=txt, text_color="#00E676" if "Создано" in txt else "orange"))
+            self.after(0, self.refresh_weekend_status)
+
+    def refresh_weekend_status(self):
+        try:
+            _, _, w_key = get_current_weekend_window()
+            db = load_processed_matches()
+            is_done = is_weekend_completed(w_key, db)
+            if is_done:
+                w_info = db.get("completed_weekends", {}).get(w_key, {})
+                days_txt = ""
+                if isinstance(w_info, dict):
+                    def_info = w_info.get("default", w_info)
+                    days_txt = f" ({', '.join(def_info.get('days', []))})"
+                self.lbl_weekend_status.configure(
+                    text=f"Выходные {w_key}: Завершены{days_txt} (проверки отключены)",
+                    text_color="#4CAF50"
+                )
+            else:
+                self.lbl_weekend_status.configure(
+                    text=f"Выходные {w_key}: В процессе (проверки активны)",
+                    text_color="#FFA726"
+                )
+        except Exception as e:
+            self.lbl_weekend_status.configure(text=f"Выходные: {e}", text_color="gray")
+
+    def reset_weekend_clicked(self):
+        _, _, w_key = get_current_weekend_window()
+        reset_weekend_status(w_key)
+        self.refresh_weekend_status()
+        messagebox.showinfo("Автопилот", f"Статус выходных '{w_key}' сброшен.\nАвтопилот снова будет проверять появление матчей.")
+
 
     def check_browser_status(self):
         current_state = is_chrome_running()
@@ -453,12 +909,43 @@ class AFLPublisherApp(ctk.CTk):
                            colors_dict):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        keys_dir = self.stream_keys_dir_var.get().strip() or "stream_keys"
+        target_ch_id = self.rutube_channel_id_var.get().strip() or "77095292"
         self.pipeline_task = loop.create_task(
             process_selected_matches(selected_matches, pattern_mode, test_mode, league, default_color, desc_text,
-                                     colors_dict))
+                                     colors_dict, stream_keys_dir=keys_dir, rutube_channel_id=target_ch_id))
 
         try:
-            loop.run_until_complete(self.pipeline_task)
+            success_count, keys_file, results = loop.run_until_complete(self.pipeline_task)
+
+            # Сохранение в базу обработанных матчей
+            db = load_processed_matches()
+            record_processed_matches(results, db)
+
+            # Отправка отчета в Telegram
+            token = self.tg_bot_token_var.get().strip()
+            cid = self.tg_chat_id_var.get().strip()
+            if token and cid:
+                notifier = TelegramNotifier(token, cid)
+                report_lines = [
+                    f"<b>GOAL: Создано {success_count} из {len(selected_matches)} трансляций</b>",
+                    f"Дата: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}\n",
+                    "<b>Матчи:</b>"
+                ]
+                for item in results:
+                    m = item["match"]
+                    v = item.get("video_url")
+                    icon = "[OK]" if item.get("success") else "[ERR]"
+                    if v:
+                        report_lines.append(f"{icon} <a href='{v}'>{m.stream_title}</a>")
+                    else:
+                        report_lines.append(f"{icon} {m.stream_title}")
+
+                notifier.send_message("\n".join(report_lines))
+
+                if self.tg_send_file_var.get() and os.path.exists(keys_file):
+                    notifier.send_document(keys_file, caption=f"Ключи трансляций ({datetime.datetime.now().strftime('%d.%m.%Y')})")
+
         except asyncio.CancelledError:
             logging.warning("Остановлено пользователем.")
         except Exception as e:
@@ -479,7 +966,7 @@ class AFLPublisherApp(ctk.CTk):
             if text:
                 self.clipboard_clear()
                 self.clipboard_append(text)
-                logging.info("📋 Все логи скопированы в буфер обмена!")
+                logging.info("Все логи скопированы в буфер обмена.")
         except Exception as e:
             logging.error(f"Не удалось скопировать логи: {e}")
 
@@ -489,7 +976,7 @@ class AFLPublisherApp(ctk.CTk):
             if sel:
                 self.clipboard_clear()
                 self.clipboard_append(sel)
-                logging.info("📋 Выделенный фрагмент логов скопирован!")
+                logging.info("Выделенный фрагмент логов скопирован.")
                 return
         except Exception:
             pass

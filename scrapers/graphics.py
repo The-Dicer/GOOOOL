@@ -5,9 +5,89 @@ import logging
 import asyncio
 from pathlib import Path
 from typing import Optional, Dict
+from PIL import Image
 from models import MatchMetadata
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_cover_image(image_path: Path):
+    """
+    Нормализует сгенерированную обложку:
+    1. Автоматически сканирует границы изображения и полностью срезает артефактные
+       белые/светлые полосы (включая 3px белую полосу слева и субпиксельный шум снизу/сверху/справа).
+    2. Приводит пропорции строго к соотношению 16:9 без искажений.
+    3. Масштабирует изображение до эталонного Full HD 1920x1080 через фильтр Lanczos.
+    """
+    try:
+        if not image_path.exists():
+            return
+        with Image.open(image_path) as img:
+            img = img.convert("RGB")
+            w, h = img.size
+
+            # 1. Детектирование белых/артефактных колонок слева (до 30px)
+            left_crop = 0
+            for x in range(min(30, w // 10)):
+                white_count = sum(1 for y in range(0, h, 2) if all(c > 220 for c in img.getpixel((x, y))))
+                if white_count > (h // 2) * 0.7:
+                    left_crop = x + 1
+                else:
+                    break
+
+            # 2. Детектирование белых/артефактных колонок справа (до 30px)
+            right_crop = w
+            for x in range(w - 1, max(w - 31, w * 9 // 10), -1):
+                white_count = sum(1 for y in range(0, h, 2) if all(c > 220 for c in img.getpixel((x, y))))
+                if white_count > (h // 2) * 0.7:
+                    right_crop = x
+                else:
+                    break
+
+            # 3. Детектирование белых/артефактных строк сверху (до 30px)
+            top_crop = 0
+            for y in range(min(30, h // 10)):
+                white_count = sum(1 for x in range(0, w, 2) if all(c > 220 for c in img.getpixel((x, y))))
+                if white_count > (w // 2) * 0.7:
+                    top_crop = y + 1
+                else:
+                    break
+
+            # 4. Детектирование белых/артефактных строк снизу (до 30px)
+            bottom_crop = h
+            for y in range(h - 1, max(h - 31, h * 9 // 10), -1):
+                white_count = sum(1 for x in range(0, w, 2) if all(c > 220 for c in img.getpixel((x, y))))
+                if white_count > (w // 2) * 0.7:
+                    bottom_crop = y
+                else:
+                    break
+
+            # Срезаем артефакты по краям
+            if left_crop > 0 or top_crop > 0 or right_crop < w or bottom_crop < h:
+                logger.info(f"Срезаны артефактные поля: слева={left_crop}px, сверху={top_crop}px, справа={w - right_crop}px, снизу={h - bottom_crop}px")
+                img = img.crop((left_crop, top_crop, right_crop, bottom_crop))
+                w, h = img.size
+
+            # Приведение к эталонному соотношению 16:9
+            target_ratio = 16.0 / 9.0
+            current_ratio = w / h
+
+            if current_ratio > target_ratio:
+                new_w = int(h * target_ratio)
+                offset = (w - new_w) // 2
+                img = img.crop((offset, 0, offset + new_w, h))
+            elif current_ratio < target_ratio:
+                new_h = int(w / target_ratio)
+                img = img.crop((0, 0, w, new_h))
+
+            # Ресайз к эталонному Full HD 1920x1080
+            if img.size != (1920, 1080):
+                img = img.resize((1920, 1080), Image.Resampling.LANCZOS)
+
+            img.save(image_path, format="PNG", optimize=True)
+            logger.info(f"Обложка нормализована к Full HD 1920x1080 (16:9) без полос: {image_path}")
+    except Exception as e:
+        logger.warning(f"Не удалось нормализовать обложку ({e}), используется исходный файл")
 
 
 async def _run_graphics_flow(graphics_page, match: MatchMetadata, pattern_mode: str, league: str,
@@ -21,20 +101,56 @@ async def _run_graphics_flow(graphics_page, match: MatchMetadata, pattern_mode: 
     except Exception:
         pass
 
-    # 1. ПРОВЕРКА / ВЫБОР ТУРНИРА
+    # 1. ПРОВЕРКА / ВЫБОР ЛИГИ
+    target_league = league.strip() if league else "AFL Moscow 8x8"
+    league_input = graphics_page.locator("input[placeholder='Select league']").first
+    current_league_val = ""
+    league_changed = False
+
+    if await league_input.count() > 0:
+        try:
+            current_league_val = (await league_input.input_value()).strip()
+        except Exception:
+            pass
+
+        if target_league.lower() in current_league_val.lower() and current_league_val:
+            logger.info(f"Лига '{target_league}' уже активна ({current_league_val}).")
+        else:
+            logger.info(f"Выбор лиги: '{target_league}' (текущая: '{current_league_val}')...")
+            await league_input.click(force=True)
+            await graphics_page.wait_for_timeout(200)
+            await league_input.fill(target_league)
+            await graphics_page.wait_for_timeout(400)
+
+            # Ищем отфильтрованную опцию
+            league_opt = graphics_page.locator(".mantine-Select-item, [role='option']").filter(has_text=target_league).first
+            if await league_opt.count() == 0:
+                league_opt = graphics_page.locator(".mantine-Select-item, [role='option']").filter(
+                    has_text=re.compile(re.escape(target_league), re.IGNORECASE)
+                ).first
+
+            if await league_opt.count() > 0:
+                await league_opt.click(force=True)
+                league_changed = True
+                logger.info(f"Лига '{target_league}' успешно выбрана.")
+                await graphics_page.wait_for_timeout(500)
+            else:
+                logger.warning(f"Опция лиги '{target_league}' не найдена в списке селектора!")
+
+    # 2. ПРОВЕРКА / ВЫБОР ТУРНИРА
     target_tournament = match.tournament_name
     season_input = graphics_page.locator("input[placeholder='Select season']").first
     current_season_val = ""
-    if await season_input.count() > 0:
+    if not league_changed and await season_input.count() > 0:
         try:
             current_season_val = await season_input.input_value()
         except Exception:
             pass
 
-    if target_tournament.lower() in current_season_val.lower() and current_season_val.strip():
+    if not league_changed and target_tournament.lower() in current_season_val.lower() and current_season_val.strip():
         logger.info(f"Турнир '{target_tournament}' уже активен ({current_season_val}).")
     else:
-        logger.info(f"Выбор турнира: {target_tournament} ({league})...")
+        logger.info(f"Выбор турнира: {target_tournament} ({target_league})...")
         season_wrapper = season_input.locator("xpath=..")
         chevron = season_wrapper.locator(".mantine-Input-rightSection")
         if await chevron.count() > 0:
@@ -44,6 +160,14 @@ async def _run_graphics_flow(graphics_page, match: MatchMetadata, pattern_mode: 
 
         modal_inner = graphics_page.locator(".mantine-Modal-inner")
         await modal_inner.wait_for(state="visible", timeout=6000)
+
+        # Надежное ожидание подгрузки турниров в модальное окно
+        try:
+            await modal_inner.locator(".IgrSeasonSelect_country__letoO, .IgrSeasonSelect_champ__r06TO").first.wait_for(
+                state="visible", timeout=10000
+            )
+        except Exception as load_err:
+            logger.warning(f"Ожидание появления турниров в модальном окне: {load_err}")
 
         def normalize_name(text: str) -> str:
             if not text:
@@ -150,7 +274,7 @@ async def _run_graphics_flow(graphics_page, match: MatchMetadata, pattern_mode: 
                     break
 
         if not found_league:
-            logger.error(f"❌ Турнир '{target_tournament}' не найден! Доступные турниры на сайте: {available_champs}")
+            logger.error(f"Турнир '{target_tournament}' не найден! Доступные турниры на сайте: {available_champs}")
             raise ValueError(f"Турнир '{target_tournament}' не найден среди доступных на AFL Graphics: {available_champs}")
 
         target_ch_elem, found_c_name, found_ch_title = found_league
@@ -291,7 +415,7 @@ async def _run_graphics_flow(graphics_page, match: MatchMetadata, pattern_mode: 
 
     color_res = await graphics_page.evaluate(color_script)
     if color_res and color_res.get("success"):
-        logger.info(f"✅ Успешно установлен цвет № {color_res.get('color')}, паттерн № {color_res.get('pattern')}")
+        logger.info(f"Успешно установлен цвет № {color_res.get('color')}, паттерн № {color_res.get('pattern')}")
     elif color_res and color_res.get("error"):
         logger.warning(f"Предупреждение при выборе цвета: {color_res.get('error')}")
     await graphics_page.wait_for_timeout(250)
@@ -391,7 +515,8 @@ async def _run_graphics_flow(graphics_page, match: MatchMetadata, pattern_mode: 
         await graphics_page.evaluate(restore_script, state)
 
         if download_path.exists() and download_path.stat().st_size > 15000:
-            logger.info(f"✅ Обложка успешно сохранена: {download_path}")
+            _normalize_cover_image(download_path)
+            logger.info(f"Обложка успешно сохранена: {download_path}")
             return str(download_path)
     except Exception as local_err:
         logger.warning(f"Локальный захват не удался ({local_err}), пробуем сетевой перехват...")
@@ -468,6 +593,7 @@ async def _run_graphics_flow(graphics_page, match: MatchMetadata, pattern_mode: 
                 raw_bytes = base64.b64decode(b64_str)
                 with open(download_path, "wb") as f:
                     f.write(raw_bytes)
+                _normalize_cover_image(download_path)
                 logger.info(f"Обложка успешно скачана: {download_path}")
                 return str(download_path)
             elif res and res.get("error"):
@@ -482,6 +608,7 @@ async def _run_graphics_flow(graphics_page, match: MatchMetadata, pattern_mode: 
             await graphics_page.get_by_role("button", name="DOWNLOAD IMAGE").click(force=True)
         download = await download_info.value
         await download.save_as(download_path)
+        _normalize_cover_image(download_path)
         logger.info(f"Обложка успешно скачана через expect_download: {download_path}")
         return str(download_path)
     except Exception as fallback_err:
@@ -534,7 +661,7 @@ async def prepare_graphics(context, match: MatchMetadata, pattern_mode: str = "�
             )
         except (asyncio.TimeoutError, Exception) as e:
             if attempt < max_graphics_attempts:
-                logger.warning(f"⚠️ Обложка не скачалась ({e}). Обновляем страницу AFL Graphics и пробуем заново...")
+                logger.warning(f"Обложка не скачалась ({e}). Обновляем страницу AFL Graphics и пробуем заново...")
                 try:
                     await graphics_page.reload()
                     await graphics_page.wait_for_load_state("domcontentloaded")

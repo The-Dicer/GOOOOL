@@ -3,6 +3,7 @@ from typing import Optional
 import datetime
 
 class MatchMetadata(BaseModel):
+    match_id: Optional[str] = Field(None, description="ID матча в Footballista")
     team_home: str = Field(..., description="Название домашней команды")
     team_away: str = Field(..., description="Название гостевой команды")
     tournament_name: str = Field(..., description="Название турнира или лиги")
@@ -15,6 +16,7 @@ class MatchMetadata(BaseModel):
     logo_away: str = Field("Нет логотипа", description="Ссылка на лого гостей")
     abbr_home: str = Field("", description="Сокращение хозяев")
     abbr_away: str = Field("", description="Сокращение гостей")
+    has_video: bool = Field(False, description="Прикреплена ли уже трансляция к матчу")
 
     @property
     def stream_title(self) -> str:

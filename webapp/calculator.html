@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>GOAL: Расчет оплаты оператора</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg-color: #17212b;
+      --card-bg: #242f3d;
+      --card-hover: #2b394a;
+      --text-main: #f5f5f5;
+      --text-muted: #8e9ca8;
+      --accent: #2481cc;
+      --accent-hover: #288fe0;
+      --success: #4fae67;
+      --danger: #e53935;
+      --warning: #f5a623;
+      --border: #1d2733;
+      --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: var(--font-family);
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      padding: 16px;
+      padding-bottom: 90px;
+      line-height: 1.4;
+    }
+
+    .container {
+      max-width: 540px;
+      margin: 0 auto;
+    }
+
+    /* ШАПКА */
+    .header {
+      text-align: center;
+      margin-bottom: 18px;
+    }
+    .header h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .header .subtitle {
+      font-size: 0.88rem;
+      color: var(--text-muted);
+    }
+
+    /* ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМОВ (ВЫХОДНЫЕ / ПРОИЗВОЛЬНЫЙ ПЕРИОД) */
+    .mode-tabs {
+      display: flex;
+      background: #141c24;
+      border-radius: 10px;
+      padding: 3px;
+      margin-bottom: 14px;
+      border: 1px solid var(--border);
+    }
+    .mode-tab {
+      flex: 1;
+      padding: 8px 6px;
+      border-radius: 8px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 0.80rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: center;
+    }
+    .mode-tab.active {
+      background: var(--card-bg);
+      color: #64b5f6;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+
+    /* БЛОК МЕСЯЦА И ВЫХОДНЫХ */
+    .period-card {
+      background: var(--card-bg);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 14px;
+      border: 1px solid var(--border);
+    }
+
+    /* БЛОК ПРОИЗВОЛЬНОГО ПЕРИОДА (FAILSAFE) */
+    .custom-period-card {
+      background: var(--card-bg);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 14px;
+      border: 1px solid var(--border);
+      display: none;
+    }
+    .date-inputs-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .date-input-wrap {
+      flex: 1;
+    }
+    .date-input-wrap label {
+      display: block;
+      font-size: 0.74rem;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .date-picker {
+      width: 100%;
+      background: #17212b;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      color: var(--text-main);
+      font-size: 0.88rem;
+      outline: none;
+    }
+    .custom-period-badge {
+      display: inline-block;
+      background: rgba(36, 129, 204, 0.15);
+      color: #64b5f6;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.80rem;
+      font-weight: 600;
+      border: 1px solid rgba(100, 181, 246, 0.3);
+    }
+    .btn-add-match {
+      background: #1e3a5f;
+      border: 1px solid rgba(100, 181, 246, 0.3);
+      color: #64b5f6;
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-add-match:active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    /* ФОРМА ДОБАВЛЕНИЯ МАТЧА */
+    .add-match-form {
+      background: #18232f;
+      border-radius: 10px;
+      padding: 12px;
+      margin-top: 10px;
+      border: 1px dashed rgba(100, 181, 246, 0.4);
+      display: none;
+    }
+    .add-match-input {
+      width: 100%;
+      background: #111a24;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px;
+      color: #fff;
+      font-size: 0.85rem;
+      margin-bottom: 8px;
+      outline: none;
+    }
+
+    .month-selector {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .month-nav-btn {
+      background: #1c2530;
+      border: 1px solid var(--border);
+      color: var(--text-main);
+      font-size: 1.1rem;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .month-nav-btn:active {
+      background: var(--accent);
+    }
+    .month-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #64b5f6;
+    }
+
+    .weekend-badge {
+      display: inline-block;
+      background: #1c2734;
+      color: #ffb74d;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      border: 1px solid rgba(255, 183, 77, 0.2);
+    }
+
+    /* БЛОК ВВОДА СТАВКИ */
+    .rate-card {
+      background: var(--card-bg);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 16px;
+      border: 1px solid var(--border);
+    }
+    .rate-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .rate-label {
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    .rate-input-wrap {
+      display: flex;
+      align-items: center;
+      background: #17212b;
+      border-radius: 8px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      width: 140px;
+    }
+    .rate-input {
+      background: transparent;
+      border: none;
+      color: #4fae67;
+      font-size: 1.15rem;
+      font-weight: 700;
+      width: 100%;
+      text-align: right;
+      outline: none;
+    }
+    .rate-unit {
+      color: var(--text-muted);
+      margin-left: 4px;
+      font-weight: 600;
+    }
+
+    .quick-rates {
+      display: flex;
+      gap: 6px;
+      margin-top: 10px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .btn-quick {
+      background: #1a2430;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn-quick:active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    /* СПИСОК МАТЧЕЙ */
+    .section-title {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .matches-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .match-item {
+      background: var(--card-bg);
+      border-radius: 10px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .match-item:active {
+      transform: scale(0.99);
+    }
+    .match-item.unpaid {
+      opacity: 0.5;
+      background: #1b232c;
+      border-color: #25313d;
+    }
+
+    .match-checkbox {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      border: 2px solid #546e7a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.15s ease;
+    }
+    .match-item:not(.unpaid) .match-checkbox {
+      background: var(--success);
+      border-color: var(--success);
+    }
+    .match-item.unpaid .match-checkbox {
+      background: transparent;
+      border-color: #546e7a;
+    }
+    .match-checkbox svg {
+      fill: none;
+      stroke: white;
+      stroke-width: 3;
+      width: 14px;
+      height: 14px;
+    }
+
+    .match-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .match-title {
+      font-size: 0.92rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 2px;
+    }
+    .match-meta {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .match-status-tag {
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+    .match-status-tag.paid {
+      background: rgba(79, 174, 103, 0.15);
+      color: #81c784;
+    }
+    .match-status-tag.unpaid {
+      background: rgba(229, 57, 53, 0.15);
+      color: #e57373;
+    }
+
+    /* ИТОГОВЫЙ БЛОК */
+    .summary-card {
+      background: linear-gradient(135deg, #1e3a5f 0%, #172a45 100%);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+      border: 1px solid rgba(100, 181, 246, 0.2);
+    }
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 0.9rem;
+    }
+    .summary-row.total {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      margin-bottom: 0;
+    }
+    .total-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .total-amount {
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: #4caf50;
+    }
+
+    /* НАКОПИТЕЛЬНЫЙ ИТОГ ЗА МЕСЯЦ */
+    .monthly-card {
+      background: var(--card-bg);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 20px;
+      border: 1px solid var(--border);
+    }
+    .monthly-header {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #64b5f6;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .monthly-list {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+    .monthly-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+    }
+    .monthly-item.current {
+      color: var(--text-main);
+      font-weight: 600;
+    }
+    .monthly-total {
+      display: flex;
+      justify-content: space-between;
+      padding-top: 6px;
+      border-top: 1px dashed var(--border);
+      font-weight: 700;
+      color: #ffb74d;
+      font-size: 0.95rem;
+    }
+
+    /* ПЛАВАЮЩАЯ КНОПКА КОПИРОВАНИЯ */
+    .footer-actions {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(23, 33, 43, 0.92);
+      backdrop-filter: blur(10px);
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: center;
+    }
+    .btn-copy {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      width: 100%;
+      max-width: 540px;
+      padding: 14px;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 12px rgba(36, 129, 204, 0.35);
+      transition: background 0.15s ease;
+    }
+    .btn-copy:active {
+      background: var(--accent-hover);
+    }
+
+    /* УВЕДОМЛЕНИЕ О КОПИРОВАНИИ */
+    .toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-50px);
+      background: #2e7d32;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+      opacity: 0;
+      transition: all 0.25s ease;
+      z-index: 1000;
+      pointer-events: none;
+    }
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+
+    .privacy-note {
+      text-align: center;
+      font-size: 0.74rem;
+      color: #607282;
+      margin-top: 15px;
+      line-height: 1.3;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <!-- ШАПКА -->
+    <div class="header">
+      <h1>Расчет оплаты оператора</h1>
+      <div class="subtitle">Персональный финансовый учет матчей</div>
+    </div>
+
+    <!-- ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМОВ -->
+    <div class="mode-tabs">
+      <button class="mode-tab active" id="tabWeekend" onclick="switchMode('weekend')">Выходные</button>
+      <button class="mode-tab" id="tabCustom" onclick="switchMode('custom')">Произвольный период (Failsafe)</button>
+    </div>
+
+    <!-- ВЫБОР МЕСЯЦА И ВЫХОДНЫХ (СТАНДАРТНЫЙ РЕЖИМ) -->
+    <div class="period-card" id="weekendPeriodCard">
+      <div class="month-selector">
+        <button class="month-nav-btn" onclick="shiftMonth(-1)">‹</button>
+        <div class="month-title" id="monthNameText">Сентябрь 2026</div>
+        <button class="month-nav-btn" onclick="shiftMonth(1)">›</button>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span class="weekend-badge" id="weekendBadge">Выходные #2 (11.09 – 13.09)</span>
+        <span style="font-size: 0.78rem; color: var(--text-muted);">Отсчет от пятницы</span>
+      </div>
+    </div>
+
+    <!-- БЛОК ПРОИЗВОЛЬНОГО ПЕРИОДА (FAILSAFE) -->
+    <div class="custom-period-card" id="customPeriodCard">
+      <div class="date-inputs-row">
+        <div class="date-input-wrap">
+          <label for="customDateFrom">С даты:</label>
+          <input type="date" id="customDateFrom" class="date-picker" onchange="onCustomDateRangeChanged()">
+        </div>
+        <div class="date-input-wrap">
+          <label for="customDateTo">По дату:</label>
+          <input type="date" id="customDateTo" class="date-picker" onchange="onCustomDateRangeChanged()">
+        </div>
+      </div>
+      <div class="quick-rates" style="margin-top: 0; margin-bottom: 10px;">
+        <span style="font-size: 0.75rem; color: var(--text-muted); align-self: center;">Период:</span>
+        <button class="btn-quick" onclick="applyPresetPeriod(7)">7 дней</button>
+        <button class="btn-quick" onclick="applyPresetPeriod(14)">14 дней</button>
+        <button class="btn-quick" onclick="applyPresetPeriod('this_month')">Этот месяц</button>
+        <button class="btn-quick" onclick="applyPresetPeriod('all')">Весь архив</button>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span class="custom-period-badge" id="customPeriodBadge">Произвольный период</span>
+        <button class="btn-add-match" onclick="toggleAddMatchForm()">+ Добавить матч</button>
+      </div>
+
+      <!-- ФОРМА РУЧНОГО ДОБАВЛЕНИЯ МАТЧА -->
+      <div class="add-match-form" id="addMatchForm">
+        <div style="font-size: 0.8rem; font-weight: 700; margin-bottom: 6px; color: #64b5f6;">Добавить матч вручную:</div>
+        <input type="text" id="manualMatchTitle" class="add-match-input" placeholder="Название (например: ЦСКА - Спартак)">
+        <div style="display: flex; gap: 8px;">
+          <input type="text" id="manualMatchTime" class="add-match-input" placeholder="Время (14:00)">
+          <input type="text" id="manualMatchStadium" class="add-match-input" placeholder="Стадион (Труд)">
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <label style="font-size: 0.78rem; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+            <input type="checkbox" id="manualMatchPaid" checked> Оплачивается
+          </label>
+          <div style="display: flex; gap: 6px;">
+            <button class="btn-quick" onclick="toggleAddMatchForm()">Отмена</button>
+            <button class="btn-quick" style="background: var(--success); color: #fff; border-color: var(--success);" onclick="submitManualMatch()">Добавить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- СТАВКА ЗА МАТЧ -->
+    <div class="rate-card">
+      <div class="rate-row">
+        <span class="rate-label">Моя ставка за матч:</span>
+        <div class="rate-input-wrap">
+          <input type="number" id="rateInput" class="rate-input" value="1200" step="50" min="0" oninput="onRateChanged()">
+          <span class="rate-unit">₽</span>
+        </div>
+      </div>
+      <div class="quick-rates">
+        <span style="font-size: 0.75rem; color: var(--text-muted); align-self: center;">Быстро:</span>
+        <button class="btn-quick" onclick="setQuickRate(800)">800 ₽</button>
+        <button class="btn-quick" onclick="setQuickRate(1000)">1 000 ₽</button>
+        <button class="btn-quick" onclick="setQuickRate(1200)">1 200 ₽</button>
+        <button class="btn-quick" onclick="setQuickRate(1500)">1 500 ₽</button>
+      </div>
+    </div>
+
+    <!-- СПИСОК МАТЧЕЙ -->
+    <div class="section-title">
+      <span id="sectionMatchesTitle">Матчи этих выходных</span>
+      <span id="matchesCountHeader" style="color: #64b5f6;">0 матчей</span>
+    </div>
+
+    <div class="matches-list" id="matchesList">
+      <!-- Список генерируется через JS -->
+    </div>
+
+    <!-- ЧЕК ЗА ВЫХОДНЫЕ / ПЕРИОД -->
+    <div class="summary-card">
+      <div class="summary-row">
+        <span style="color: rgba(255,255,255,0.8);">Всего назначено матчей:</span>
+        <strong id="sumTotalMatches">0</strong>
+      </div>
+      <div class="summary-row">
+        <span style="color: rgba(255,255,255,0.8);">Оплачиваемые матчи:</span>
+        <strong style="color: #81c784;" id="sumPaidMatches">0</strong>
+      </div>
+      <div class="summary-row" id="rowUnpaidMatches" style="display: none;">
+        <span style="color: rgba(255,255,255,0.8);">Без оплаты (отмена/штраф):</span>
+        <strong style="color: #e57373;" id="sumUnpaidMatches">0</strong>
+      </div>
+      <div class="summary-row total">
+        <span class="total-title" id="sumTotalLabel">К ОПЛАТЕ ЗА ВЫХОДНЫЕ:</span>
+        <span class="total-amount" id="sumWeekendTotal">0 ₽</span>
+      </div>
+    </div>
+
+    <!-- НАКОПИТЕЛЬНЫЙ ИТОГ ЗА МЕСЯЦ -->
+    <div class="monthly-card" id="monthlyCard">
+      <div class="monthly-header">
+        <span>Итог за <span id="monthlyMonthLabel">Сентябрь</span></span>
+        <span style="font-size: 0.76rem; color: var(--text-muted); cursor: pointer;" onclick="clearMonthArchive()">сбросить историю</span>
+      </div>
+      <div class="monthly-list" id="monthlyArchiveList">
+        <!-- Список выходных месяца -->
+      </div>
+      <div class="monthly-total">
+        <span>ИТОГО ЗА МЕСЯЦ:</span>
+        <span id="monthlyGrandTotal">0 ₽</span>
+      </div>
+    </div>
+
+    <div class="privacy-note">
+      <b>100% приватность:</b> расчет производится на вашем смартфоне.<br>
+      Ваша ставка и заработанные суммы не отправляются на ПК или боту.
+    </div>
+  </div>
+
+  <!-- ФИКСИРОВАННАЯ КНОПКА -->
+  <div class="footer-actions">
+    <button class="btn-copy" onclick="copyReport()">
+      Скопировать отчет
+    </button>
+  </div>
+
+  <div id="toast" class="toast">Отчет скопирован в буфер!</div>
+
+  <script>
+    // Инициализация Telegram WebApp
+    if (window.Telegram && window.Telegram.WebApp) {
+      window.Telegram.WebApp.ready();
+      window.Telegram.WebApp.expand();
+    }
+
+    const MONTHS = [
+      "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+      "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
+    ];
+
+    // Текущие рабочие данные
+    let activeMode = "weekend"; // "weekend" | "custom"
+    let weekendKey = "2026-09-11_to_2026-09-13";
+    let weekendDatesStr = "11.09 – 13.09.2026";
+    let weekNumber = 2;
+    let currentMonthIndex = 8; // Сентябрь (0-11)
+    let currentYear = 2026;
+    let rate = 1200;
+
+    let weekendMatches = [];
+    let customMatches = [];
+    let matches = []; // active matches list being rendered
+
+    // Кастомный период
+    let customFromDate = "";
+    let customToDate = "";
+    let customPeriodTitle = "Произвольный период";
+
+    // Управление историей всех матчей (для фильтрации в произвольном периоде)
+    function getAllMatchesHistory() {
+      try {
+        return JSON.parse(localStorage.getItem("afl_all_matches") || "[]");
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveMatchesToHistory(newMatches) {
+      try {
+        let history = getAllMatchesHistory();
+        const existingIds = new Set(history.map(m => m.id || (m.title + "_" + m.time)));
+        newMatches.forEach(m => {
+          const key = m.id || (m.title + "_" + m.time);
+          if (!existingIds.has(key)) {
+            history.push({ ...m });
+            existingIds.add(key);
+          }
+        });
+        localStorage.setItem("afl_all_matches", JSON.stringify(history));
+      } catch (e) {
+        console.warn("Ошибка сохранения истории матчей:", e);
+      }
+    }
+
+    // Загрузка ставки из localStorage
+    function loadSavedRate() {
+      const saved = localStorage.getItem("afl_operator_rate");
+      if (saved && !isNaN(saved)) {
+        rate = parseInt(saved, 10);
+      }
+      document.getElementById("rateInput").value = rate;
+    }
+
+    function saveRate(newRate) {
+      rate = newRate;
+      localStorage.setItem("afl_operator_rate", String(rate));
+    }
+
+    function setQuickRate(val) {
+      saveRate(val);
+      document.getElementById("rateInput").value = val;
+      recalculate();
+    }
+
+    function onRateChanged() {
+      const val = parseInt(document.getElementById("rateInput").value, 10);
+      if (!isNaN(val) && val >= 0) {
+        saveRate(val);
+        recalculate();
+      }
+    }
+
+    // Переключение режимов (Выходные <-> Произвольный период)
+    function switchMode(mode) {
+      activeMode = mode;
+      const tabWeekend = document.getElementById("tabWeekend");
+      const tabCustom = document.getElementById("tabCustom");
+      const cardWeekend = document.getElementById("weekendPeriodCard");
+      const cardCustom = document.getElementById("customPeriodCard");
+      const cardMonthly = document.getElementById("monthlyCard");
+      const titleTotal = document.getElementById("sumTotalLabel");
+      const titleMatches = document.getElementById("sectionMatchesTitle");
+
+      if (activeMode === "weekend") {
+        tabWeekend.classList.add("active");
+        tabCustom.classList.remove("active");
+        cardWeekend.style.display = "block";
+        cardCustom.style.display = "none";
+        cardMonthly.style.display = "block";
+        titleTotal.textContent = "К ОПЛАТЕ ЗА ВЫХОДНЫЕ:";
+        titleMatches.textContent = "Матчи этих выходных";
+        matches = weekendMatches;
+      } else {
+        tabCustom.classList.add("active");
+        tabWeekend.classList.remove("active");
+        cardWeekend.style.display = "none";
+        cardCustom.style.display = "block";
+        cardMonthly.style.display = "none";
+        titleTotal.textContent = "К ОПЛАТЕ ЗА ПЕРИОД:";
+        titleMatches.textContent = "Матчи выбранного периода";
+
+        if (customMatches.length === 0) {
+          applyPresetPeriod(14);
+        } else {
+          matches = customMatches;
+        }
+      }
+      renderMatches();
+      recalculate();
+    }
+
+    // Разбор входных параметров из Hash URL (#data=...)
+    function parseInputData() {
+      const hash = window.location.hash || "";
+      if (hash.includes("data=")) {
+        try {
+          const rawBase64 = hash.split("data=")[1].split("&")[0];
+          const jsonStr = decodeURIComponent(escape(atob(rawBase64)));
+          const payload = JSON.parse(jsonStr);
+
+          if (payload.w_key) weekendKey = payload.w_key;
+          if (payload.dates) weekendDatesStr = payload.dates;
+          if (payload.week) weekNumber = payload.week;
+          if (payload.month_idx !== undefined) currentMonthIndex = payload.month_idx;
+          if (payload.year) currentYear = payload.year;
+          if (payload.period_title) customPeriodTitle = payload.period_title;
+
+          if (Array.isArray(payload.matches) && payload.matches.length > 0) {
+            weekendMatches = payload.matches.map((m, idx) => ({
+              id: m.id || String(idx + 1),
+              title: m.title || "Матч",
+              time: m.time || "",
+              stadium: m.stadium || "",
+              date: m.date || "",
+              paid: true
+            }));
+            matches = weekendMatches;
+            saveMatchesToHistory(weekendMatches);
+
+            // Если передан mode: "custom", сразу переключаемся
+            if (payload.mode === "custom") {
+              customMatches = [...weekendMatches];
+              matches = customMatches;
+              if (payload.dates) {
+                document.getElementById("customPeriodBadge").textContent = payload.dates;
+              }
+              switchMode("custom");
+              return;
+            }
+            return;
+          }
+        } catch (e) {
+          console.warn("Не удалось прочитать данные из хэша:", e);
+        }
+      }
+
+      // Демо-данные по умолчанию
+      const now = new Date();
+      currentMonthIndex = now.getMonth();
+      currentYear = now.getFullYear();
+      weekendMatches = [
+        { id: "1", title: "AFL 8x8. Спартак - ЦСКА", time: "Сб, 14:00", stadium: "Труд", date: "2026-09-12", paid: true },
+        { id: "2", title: "AFL 8x8. Торпедо - Родина", time: "Сб, 15:30", stadium: "Труд", date: "2026-09-12", paid: true },
+        { id: "3", title: "AFL 8x8. Локо - Динамо", time: "Вс, 11:00", stadium: "Ясенево", date: "2026-09-13", paid: true },
+        { id: "4", title: "AFL 8x8. Торпедо-2 - Сибирь", time: "Вс, 12:30", stadium: "Ясенево", date: "2026-09-13", paid: true }
+      ];
+      matches = weekendMatches;
+      saveMatchesToHistory(weekendMatches);
+    }
+
+    function initCustomDateInputs() {
+      const today = new Date();
+      const toStr = today.toISOString().split("T")[0];
+      const past = new Date(today.getTime() - 14 * 24 * 60 * 60 * 1000);
+      const fromStr = past.toISOString().split("T")[0];
+
+      document.getElementById("customDateFrom").value = fromStr;
+      document.getElementById("customDateTo").value = toStr;
+      customFromDate = fromStr;
+      customToDate = toStr;
+      updateCustomPeriodBadge();
+    }
+
+    function updateCustomPeriodBadge() {
+      const fromEl = document.getElementById("customDateFrom").value;
+      const toEl = document.getElementById("customDateTo").value;
+      if (fromEl && toEl) {
+        const d1 = fromEl.split("-").reverse().join(".");
+        const d2 = toEl.split("-").reverse().join(".");
+        customPeriodTitle = `${d1} – ${d2}`;
+      } else {
+        customPeriodTitle = "Произвольный период";
+      }
+      document.getElementById("customPeriodBadge").textContent = customPeriodTitle;
+    }
+
+    function onCustomDateRangeChanged() {
+      updateCustomPeriodBadge();
+      filterCustomMatches();
+    }
+
+    function applyPresetPeriod(preset) {
+      const today = new Date();
+      const toStr = today.toISOString().split("T")[0];
+      let fromDate = new Date();
+
+      if (preset === 7) {
+        fromDate.setDate(today.getDate() - 7);
+      } else if (preset === 14) {
+        fromDate.setDate(today.getDate() - 14);
+      } else if (preset === "this_month") {
+        fromDate = new Date(today.getFullYear(), today.getMonth(), 1);
+      } else if (preset === "all") {
+        fromDate = new Date(today.getFullYear(), 0, 1);
+      }
+
+      const fromStr = fromDate.toISOString().split("T")[0];
+      document.getElementById("customDateFrom").value = fromStr;
+      document.getElementById("customDateTo").value = toStr;
+      updateCustomPeriodBadge();
+      filterCustomMatches(preset === "all");
+    }
+
+    function filterCustomMatches(includeAll = false) {
+      const history = getAllMatchesHistory();
+      const fromVal = document.getElementById("customDateFrom").value;
+      const toVal = document.getElementById("customDateTo").value;
+
+      if (includeAll || (!fromVal && !toVal)) {
+        customMatches = history.map(m => ({ ...m }));
+      } else {
+        customMatches = history.filter(m => {
+          if (!m.date) return true;
+          return m.date >= fromVal && m.date <= toVal;
+        }).map(m => ({ ...m }));
+      }
+
+      if (customMatches.length === 0 && weekendMatches.length > 0) {
+        customMatches = weekendMatches.map(m => ({ ...m }));
+      }
+
+      if (activeMode === "custom") {
+        matches = customMatches;
+        renderMatches();
+        recalculate();
+      }
+    }
+
+    // Ручное добавление разового матча (Failsafe)
+    function toggleAddMatchForm() {
+      const form = document.getElementById("addMatchForm");
+      form.style.display = (form.style.display === "block") ? "none" : "block";
+    }
+
+    function submitManualMatch() {
+      const title = document.getElementById("manualMatchTitle").value.trim();
+      const time = document.getElementById("manualMatchTime").value.trim() || "Матч";
+      const stadium = document.getElementById("manualMatchStadium").value.trim();
+      const paid = document.getElementById("manualMatchPaid").checked;
+
+      if (!title) {
+        alert("Введите название матча!");
+        return;
+      }
+
+      const newMatch = {
+        id: "manual_" + Date.now(),
+        title: title,
+        time: time,
+        stadium: stadium,
+        date: document.getElementById("customDateTo").value || new Date().toISOString().split("T")[0],
+        paid: paid
+      };
+
+      customMatches.unshift(newMatch);
+      saveMatchesToHistory([newMatch]);
+
+      document.getElementById("manualMatchTitle").value = "";
+      document.getElementById("manualMatchTime").value = "";
+      document.getElementById("manualMatchStadium").value = "";
+      toggleAddMatchForm();
+
+      if (activeMode === "custom") {
+        matches = customMatches;
+        renderMatches();
+        recalculate();
+      }
+    }
+
+    // Смена расчетного месяца (если лига сдвинула расчет)
+    function shiftMonth(delta) {
+      currentMonthIndex += delta;
+      if (currentMonthIndex < 0) {
+        currentMonthIndex = 11;
+        currentYear--;
+      } else if (currentMonthIndex > 11) {
+        currentMonthIndex = 0;
+        currentYear++;
+      }
+      updateMonthDisplay();
+      recalculate();
+    }
+
+    function updateMonthDisplay() {
+      const monthName = MONTHS[currentMonthIndex];
+      document.getElementById("monthNameText").textContent = `${monthName} ${currentYear}`;
+      document.getElementById("monthlyMonthLabel").textContent = monthName;
+      document.getElementById("weekendBadge").textContent = `Выходные #${weekNumber} (${weekendDatesStr})`;
+    }
+
+    // Отрисовка списка матчей
+    function renderMatches() {
+      const listEl = document.getElementById("matchesList");
+      listEl.innerHTML = "";
+      document.getElementById("matchesCountHeader").textContent = `${matches.length} матчей`;
+
+      if (matches.length === 0) {
+        listEl.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 20px; font-size: 0.85rem;">Матчей за указанный период не найдено.<br>Нажмите «+ Добавить матч» для ручного ввода.</div>';
+        return;
+      }
+
+      matches.forEach((m, idx) => {
+        const item = document.createElement("div");
+        item.className = `match-item ${m.paid ? "" : "unpaid"}`;
+        item.onclick = () => toggleMatchPaid(idx);
+
+        item.innerHTML = `
+          <div class="match-checkbox">
+            ${m.paid ? '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}
+          </div>
+          <div class="match-info">
+            <div class="match-title">${m.title}</div>
+            <div class="match-meta">
+              <span>${m.time}</span>
+              ${m.stadium ? `<span>${m.stadium}</span>` : ''}
+            </div>
+          </div>
+          <div class="match-status-tag ${m.paid ? 'paid' : 'unpaid'}">
+            ${m.paid ? (rate ? `+${rate} ₽` : 'Оплата') : 'Без оплаты'}
+          </div>
+        `;
+        listEl.appendChild(item);
+      });
+    }
+
+    function toggleMatchPaid(idx) {
+      matches[idx].paid = !matches[idx].paid;
+      renderMatches();
+      recalculate();
+    }
+
+    // Пересчет сумм
+    function recalculate() {
+      const totalCount = matches.length;
+      const paidCount = matches.filter(m => m.paid).length;
+      const unpaidCount = totalCount - paidCount;
+      const periodSum = paidCount * rate;
+
+      document.getElementById("sumTotalMatches").textContent = totalCount;
+      document.getElementById("sumPaidMatches").textContent = paidCount;
+      document.getElementById("sumUnpaidMatches").textContent = unpaidCount;
+      document.getElementById("rowUnpaidMatches").style.display = unpaidCount > 0 ? "flex" : "none";
+      document.getElementById("sumWeekendTotal").textContent = `${periodSum.toLocaleString('ru-RU')} ₽`;
+
+      if (activeMode === "weekend") {
+        saveToMonthArchive(paidCount, periodSum);
+        renderMonthlyArchive();
+      }
+    }
+
+    // Управление архивом месяца (накопительный итог в телефоне)
+    function getArchiveKey() {
+      return `afl_month_${currentYear}_${currentMonthIndex}`;
+    }
+
+    function saveToMonthArchive(paidCount, totalEarned) {
+      try {
+        const key = getArchiveKey();
+        let archive = JSON.parse(localStorage.getItem(key) || "{}");
+        archive[weekendKey] = {
+          week: weekNumber,
+          dates: weekendDatesStr,
+          paid: paidCount,
+          total: totalEarned
+        };
+        localStorage.setItem(key, JSON.stringify(archive));
+      } catch (e) {
+        console.warn("Ошибка сохранения архива:", e);
+      }
+    }
+
+    function renderMonthlyArchive() {
+      const key = getArchiveKey();
+      let archive = {};
+      try {
+        archive = JSON.parse(localStorage.getItem(key) || "{}");
+      } catch (e) {}
+
+      const listEl = document.getElementById("monthlyArchiveList");
+      listEl.innerHTML = "";
+
+      let grandTotal = 0;
+      const entries = Object.entries(archive).sort((a, b) => (a[1].week || 0) - (b[1].week || 0));
+
+      if (entries.length === 0) {
+        listEl.innerHTML = '<div style="color: var(--text-muted); font-size: 0.8rem;">Пока нет сохраненных записей</div>';
+      } else {
+        entries.forEach(([wKey, item]) => {
+          grandTotal += (item.total || 0);
+          const isCurrent = (wKey === weekendKey);
+          const row = document.createElement("div");
+          row.className = `monthly-item ${isCurrent ? 'current' : ''}`;
+          row.innerHTML = `
+            <span>Выходные #${item.week} (${item.dates}) [${item.paid} игр]:</span>
+            <strong>${(item.total || 0).toLocaleString('ru-RU')} ₽</strong>
+          `;
+          listEl.appendChild(row);
+        });
+      }
+
+      document.getElementById("monthlyGrandTotal").textContent = `${grandTotal.toLocaleString('ru-RU')} ₽`;
+    }
+
+    function clearMonthArchive() {
+      if (confirm(`Очистить сохраненную историю за ${MONTHS[currentMonthIndex]}?`)) {
+        localStorage.removeItem(getArchiveKey());
+        recalculate();
+      }
+    }
+
+    // Копирование аккуратного отчета
+    function copyReport() {
+      const paidCount = matches.filter(m => m.paid).length;
+      const unpaidMatches = matches.filter(m => !m.paid);
+      const periodSum = paidCount * rate;
+
+      let text = "";
+      if (activeMode === "weekend") {
+        const monthName = MONTHS[currentMonthIndex];
+        let grandTotal = periodSum;
+        try {
+          const archive = JSON.parse(localStorage.getItem(getArchiveKey()) || "{}");
+          grandTotal = Object.values(archive).reduce((sum, item) => sum + (item.total || 0), 0);
+        } catch (e) {}
+
+        text += `Отчет оператора за выходные\n`;
+        text += `Период: ${weekendDatesStr} (${monthName}, Выходные #${weekNumber})\n`;
+        text += `Ставка за игру: ${rate.toLocaleString('ru-RU')} ₽\n`;
+        text += `Всего матчей: ${matches.length}\n`;
+        text += `Оплачиваемых: ${paidCount} (${periodSum.toLocaleString('ru-RU')} ₽)\n`;
+        if (unpaidMatches.length > 0) {
+          text += `Без оплаты: ${unpaidMatches.length}\n`;
+          unpaidMatches.forEach(m => {
+            text += `   • ${m.title} (${m.time})\n`;
+          });
+        }
+        text += `\nК ВЫПЛАТЕ ЗА ВЫХОДНЫЕ: ${periodSum.toLocaleString('ru-RU')} ₽\n`;
+        text += `ВСЕГО ЗА ${monthName.toUpperCase()}: ${grandTotal.toLocaleString('ru-RU')} ₽`;
+      } else {
+        text += `Отчет оператора (Произвольный период / Failsafe)\n`;
+        text += `Даты: ${customPeriodTitle}\n`;
+        text += `Ставка за игру: ${rate.toLocaleString('ru-RU')} ₽\n`;
+        text += `Всего матчей: ${matches.length}\n`;
+        text += `Оплачиваемых: ${paidCount} (${periodSum.toLocaleString('ru-RU')} ₽)\n`;
+        if (unpaidMatches.length > 0) {
+          text += `Без оплаты: ${unpaidMatches.length}\n`;
+          unpaidMatches.forEach(m => {
+            text += `   • ${m.title} (${m.time})\n`;
+          });
+        }
+        text += `\nК ВЫПЛАТЕ ЗА ПЕРИОД: ${periodSum.toLocaleString('ru-RU')} ₽`;
+      }
+
+      navigator.clipboard.writeText(text).then(() => {
+        showToast();
+      }).catch(() => {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        showToast();
+      });
+    }
+
+    function showToast() {
+      const t = document.getElementById("toast");
+      t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 2200);
+    }
+
+    // Старт
+    loadSavedRate();
+    initCustomDateInputs();
+    parseInputData();
+    updateMonthDisplay();
+    renderMatches();
+    recalculate();
+  </script>
+</body>
+</html>

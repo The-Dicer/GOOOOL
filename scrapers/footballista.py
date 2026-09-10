@@ -170,9 +170,17 @@ async def get_all_weekend_matches(context, debug_30_matches: bool = False) -> Li
 
             champ_name = (champ_obj.get("name") or "AFL").strip()
             stadium_name = (stadium_obj.get("name") or "Неизвестно").strip()
-            tour_number = str(item.get("tourNumber") or item.get("tour") or item.get("round") or "1").strip()
+            # Проверка наличия уже прикрепленных видео (трансляций)
+            existing_videos = item.get("videos") or []
+            has_video = False
+            if isinstance(existing_videos, list):
+                for v in existing_videos:
+                    if isinstance(v, dict) and v.get("link") and str(v.get("link")).strip():
+                        has_video = True
+                        break
 
             metadata = MatchMetadata(
+                match_id=str(m_id) if m_id else None,
                 team_home=team_home,
                 team_away=team_away,
                 tournament_name=champ_name,
@@ -183,7 +191,8 @@ async def get_all_weekend_matches(context, debug_30_matches: bool = False) -> Li
                 logo_home=logo_home,
                 logo_away=logo_away,
                 abbr_home=abbr_home,
-                abbr_away=abbr_away
+                abbr_away=abbr_away,
+                has_video=has_video
             )
             matches.append(metadata)
 
