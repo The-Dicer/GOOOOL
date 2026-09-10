@@ -30,7 +30,9 @@ from automation import (
     is_weekend_completed,
     reset_weekend_status,
     send_custom_period_report,
-    parse_match_date
+    parse_match_date,
+    send_operator_dispatch,
+    CONFIG_FILE
 )
 try:
     from scripts.install_scheduler_task import install_task, remove_task
@@ -967,29 +969,25 @@ class AFLPublisherApp(ctk.CTk):
             db = load_processed_matches()
             record_processed_matches(results, db)
 
-            # Отправка отчета в Telegram
+            # Персональная отправка отчетов и файлов ключей каждому оператору в Telegram
+            cfg = None
+            if os.path.exists(CONFIG_FILE):
+                try:
+                    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                        cfg = json.load(f)
+                except Exception:
+                    pass
+
             token = self.tg_bot_token_var.get().strip()
             cid = self.tg_chat_id_var.get().strip()
-            if token and cid:
-                notifier = TelegramNotifier(token, cid)
-                report_lines = [
-                    f"<b>GOAL: Создано {success_count} из {len(selected_matches)} трансляций</b>",
-                    f"Дата: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}\n",
-                    "<b>Матчи:</b>"
-                ]
-                for item in results:
-                    m = item["match"]
-                    v = item.get("video_url")
-                    icon = "[OK]" if item.get("success") else "[ERR]"
-                    if v:
-                        report_lines.append(f"{icon} <a href='{v}'>{m.stream_title}</a>")
-                    else:
-                        report_lines.append(f"{icon} {m.stream_title}")
+            notifier = TelegramNotifier(token, cid) if token else None
 
-                notifier.send_message("\n".join(report_lines))
-
-                if self.tg_send_file_var.get() and os.path.exists(keys_file):
-                    notifier.send_document(keys_file, caption=f"Ключи трансляций ({datetime.datetime.now().strftime('%d.%m.%Y')})")
+            send_operator_dispatch(
+                results=results,
+                master_keys_file=keys_file,
+                config=cfg,
+                notifier=notifier
+            )
 
         except asyncio.CancelledError:
             logging.warning("Остановлено пользователем.")

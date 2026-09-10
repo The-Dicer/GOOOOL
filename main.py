@@ -90,14 +90,30 @@ async def process_selected_matches(selected_matches, pattern_mode="Автовы�
         keys_file = os.path.join(stream_keys_dir, f"{base_name}_{counter}{extension}")
         counter += 1
 
-    # Открываем новый уникальный файл в режиме записи ("w")
+    # Открываем новый уникальный общий файл в режиме записи ("w")
     with open(keys_file, "w", encoding="utf-8") as f:
         f.write(f"=== КЛЮЧИ ТРАНСЛЯЦИЙ ({datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}) ===\n\n")
+
+    # Создаем индивидуальные файлы ключей для каждого оператора
+    op_keys_files = {}
+    unique_operators = {m.operator_name for m in selected_matches if m.operator_name}
+    for op_name in unique_operators:
+        safe_op = "".join(c for c in op_name if c.isalnum() or c in (' ', '_', '-')).strip().replace(' ', '_')
+        if not safe_op:
+            safe_op = "operator"
+        op_file = os.path.join(stream_keys_dir, f"{base_name}_{safe_op}{extension}")
+        c = 1
+        while os.path.exists(op_file):
+            op_file = os.path.join(stream_keys_dir, f"{base_name}_{safe_op}_{c}{extension}")
+            c += 1
+        with open(op_file, "w", encoding="utf-8") as f:
+            f.write(f"=== КЛЮЧИ ТРАНСЛЯЦИЙ: {op_name} ({datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}) ===\n\n")
+        op_keys_files[op_name] = op_file
 
     results = []
 
     async with async_playwright() as p:
-        browser = await p.chromium.connect_over_cdp("http://localhost:9222")
+        browser = await p.chromium.connect_over_cdp("http://127.0.0.1:9222")
         context = browser.contexts[0]
 
         success_count = 0
@@ -116,7 +132,11 @@ async def process_selected_matches(selected_matches, pattern_mode="Автовы�
                                                         stadium_colors)
 
                     target_ch = None if test_mode else rutube_channel_id
-                    video_url = await publish_stream(context, match, cover_path, desc_text, keys_file, rutube_channel_id=target_ch, test_mode=test_mode)
+                    target_files = [keys_file]
+                    if match.operator_name and match.operator_name in op_keys_files:
+                        target_files.append(op_keys_files[match.operator_name])
+
+                    video_url = await publish_stream(context, match, cover_path, desc_text, target_files, rutube_channel_id=target_ch, test_mode=test_mode)
                     created_video_url = video_url
 
                     if test_mode:
@@ -144,11 +164,16 @@ async def process_selected_matches(selected_matches, pattern_mode="Автовы�
             results.append({
                 "match": match,
                 "success": match_success,
-                "video_url": created_video_url
+                "video_url": created_video_url,
+                "operator_name": match.operator_name,
+                "operator_chat_id": match.operator_chat_id,
+                "operator_keys_file": op_keys_files.get(match.operator_name, keys_file)
             })
 
         logger.info(f"Пайплайн завершен. Успешно: {success_count} из {len(selected_matches)}.")
-        logger.info(f"Ключи трансляций сохранены в файл: {os.path.abspath(keys_file)}")
+        logger.info(f"Ключи трансляций сохранены в общий файл: {os.path.abspath(keys_file)}")
+        for op_name, op_f in op_keys_files.items():
+            logger.info(f"Файл ключей для '{op_name}': {os.path.abspath(op_f)}")
 
         return success_count, keys_file, results
 

@@ -325,17 +325,24 @@ async def publish_stream(context, match_data: MatchMetadata, cover_path: str, de
     logger.info(f"Трансляция создана: {video_url}")
     logger.info(f"Ключ трансляции получен: {stream_key[:15]}... | Сервер: {server_url}")
 
-    # Запись в файл stream_keys
-    with open(keys_file, "a", encoding="utf-8") as f:
-        f.write(f"Матч: {match_data.stream_title}\n")
-        f.write(f"URL видео: {video_url}\n")
-        f.write(f"Сервер: {server_url}\n")
-        f.write(f"Ключ: {stream_key}\n")
-        f.write(f"Лого хозяев: {match_data.logo_home}\n")
-        f.write(f"Лого гостей: {match_data.logo_away}\n")
-        f.write(f"Сокр. хозяев: {match_data.abbr_home}\n")
-        f.write(f"Сокр. гостей: {match_data.abbr_away}\n")
-        f.write("-" * 50 + "\n")
+    # Запись в файл(ы) stream_keys
+    target_files = [keys_file] if isinstance(keys_file, str) else (keys_file or [])
+    for kf in target_files:
+        if not kf:
+            continue
+        try:
+            with open(kf, "a", encoding="utf-8") as f:
+                f.write(f"Матч: {match_data.stream_title}\n")
+                f.write(f"URL видео: {video_url}\n")
+                f.write(f"Сервер: {server_url}\n")
+                f.write(f"Ключ: {stream_key}\n")
+                f.write(f"Лого хозяев: {match_data.logo_home}\n")
+                f.write(f"Лого гостей: {match_data.logo_away}\n")
+                f.write(f"Сокр. хозяев: {match_data.abbr_home}\n")
+                f.write(f"Сокр. гостей: {match_data.abbr_away}\n")
+                f.write("-" * 50 + "\n")
+            logger.info(f"Данные успешно записаны в файл: {kf}")
+        except Exception as e:
+            logger.warning(f"Не удалось записать ключ в {kf}: {e}")
 
-    logger.info(f"Данные успешно записаны в файл: {keys_file}")
     return video_url

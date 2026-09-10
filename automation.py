@@ -317,6 +317,8 @@ def record_processed_matches(results: List[Dict[str, Any]], db: Dict[str, Any]):
                 "match_date": match.match_date,
                 "stadium": match.stadium,
                 "video_url": item.get("video_url", ""),
+                "operator_name": match.operator_name,
+                "operator_chat_id": match.operator_chat_id,
                 "processed_at": now_iso
             }
     save_processed_matches(db)
@@ -407,6 +409,180 @@ def build_calculator_url(
     b64_data = base64.b64encode(raw_json.encode("utf-8")).decode("ascii")
     clean_base = (base_url or "").split("#")[0] if base_url else "https://raw.githack.com/The-Dicer/GOOOOL/master/webapp/calculator.html"
     return f"{clean_base}#data={b64_data}"
+
+
+def send_operator_dispatch(
+    results: List[Dict[str, Any]],
+    master_keys_file: str,
+    config: Optional[Dict[str, Any]] = None,
+    dates_display: Optional[str] = None,
+    week_num: Optional[int] = None,
+    month_name: Optional[str] = None,
+    friday_date: Optional[datetime.date] = None,
+    sunday_date: Optional[datetime.date] = None,
+    notifier: Optional[TelegramNotifier] = None
+) -> int:
+    """
+    Персональная рассылка отчетов и файлов ключей каждому оператору в Telegram:
+    - Каждый оператор получает ТОЛЬКО свои матчи и количество своих матчей.
+    - Каждый оператор получает ТОЛЬКО свой файл ключей (stream_keys_..._Имя.txt).
+    - Кнопка калькулятора WebApp рассчитывает оплату ТОЛЬКО для матчей данного оператора.
+    - Операторы без созданных матчей в этой пачке не получают чужие отчеты.
+    Возвращает количество операторов, которым успешно отправлены отчеты.
+    """
+    if config is None:
+        ensure_config_exists()
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        else:
+            config = {}
+
+    tg_cfg = config.get("telegram", {})
+    token = tg_cfg.get("bot_token", "")
+    primary_chat_id = str(tg_cfg.get("chat_id", "")).strip()
+    tg_send_file = tg_cfg.get("send_file", True)
+    webapp_url = tg_cfg.get("webapp_url", "https://raw.githack.com/The-Dicer/GOOOOL/master/webapp/calculator.html")
+
+    if notifier is None:
+        notifier = TelegramNotifier(token, primary_chat_id)
+
+    if not notifier.is_configured():
+        logger.warning("Telegram не настроен (отсутствует bot_token). Отправка отчетов пропущена.")
+        return 0
+
+    if friday_date is None or sunday_date is None:
+        friday_date, sunday_date, _ = get_current_weekend_window()
+    if week_num is None:
+        week_num = get_friday_week_number(friday_date)
+    if month_name is None:
+        month_name = MONTH_NAMES_RU[friday_date.month] if 1 <= friday_date.month <= 12 else ""
+    if dates_display is None:
+        dates_display = f"{friday_date.strftime('%d.%m')} – {sunday_date.strftime('%d.%m.%Y')}"
+
+    registered_ops = config.get("operators", [])
+
+    # Группировка результатов по операторам (ключ: chat_id)
+    groups: Dict[str, Dict[str, Any]] = {}
+
+    if registered_ops:
+        for op in registered_ops:
+            c_id = str(op.get("chat_id", "")).strip()
+            o_name = op.get("name", "Оператор")
+            if c_id:
+                groups[c_id] = {
+                    "name": o_name,
+                    "chat_id": c_id,
+                    "items": []
+                }
+
+    # Если зарегистрированных операторов нет, используем primary_chat_id
+    if not groups and primary_chat_id:
+        groups[primary_chat_id] = {
+            "name": "Оператор",
+            "chat_id": primary_chat_id,
+            "items": []
+        }
+
+    # Распределяем элементы results по группам операторов
+    for item in results:
+        m: MatchMetadata = item["match"]
+        assigned = False
+
+        # 1. Поиск по chat_id
+        if m.operator_chat_id and str(m.operator_chat_id).strip() in groups:
+            groups[str(m.operator_chat_id).strip()]["items"].append(item)
+            assigned = True
+        # 2. Поиск по имени оператора
+        elif m.operator_name:
+            for g in groups.values():
+                if g["name"] == m.operator_name:
+                    g["items"].append(item)
+                    assigned = True
+                    break
+
+        # 3. Fallback: если не совпало ни с кем — отправляем в fallback chat
+        if not assigned:
+            fallback_cid = primary_chat_id or (list(groups.keys())[0] if groups else None)
+            if fallback_cid:
+                if fallback_cid not in groups:
+                    groups[fallback_cid] = {
+                        "name": "Оператор",
+                        "chat_id": fallback_cid,
+                        "items": []
+                    }
+                groups[fallback_cid]["items"].append(item)
+
+    sent_count = 0
+    for cid, g_data in groups.items():
+        op_items = g_data["items"]
+        if not op_items:
+            # У этого оператора нет матчей в текущем запуске — не шлем пустые/чужие отчеты!
+            logger.info(f"Для оператора '{g_data['name']}' нет матчей в текущей партии. Уведомление пропущено.")
+            continue
+
+        op_name = g_data["name"]
+        op_total = len(op_items)
+        op_success = sum(1 for it in op_items if it.get("success"))
+
+        # Определяем персональный файл ключей
+        op_keys_file = None
+        for it in op_items:
+            cand = it.get("operator_keys_file")
+            if cand and os.path.exists(cand):
+                op_keys_file = cand
+                break
+        if not op_keys_file and master_keys_file and os.path.exists(master_keys_file):
+            op_keys_file = master_keys_file
+
+        # Формируем текст отчета
+        report_lines = [
+            f"<b>GOAL: Ваши трансляции успешно созданы</b>",
+            f"Оператор: <b>{op_name}</b>",
+            f"Период: <b>{dates_display}</b> ({month_name}, Выходные #{week_num})",
+            f"Создано: <b>{op_success}</b> из <b>{op_total}</b> ваших матчей\n",
+            "<b>Ваши матчи:</b>"
+        ]
+        for it in op_items:
+            m = it["match"]
+            v_url = it.get("video_url")
+            icon = "[OK]" if it.get("success") else "[ERR]"
+            if v_url:
+                report_lines.append(f"{icon} <a href='{v_url}'>{m.stream_title}</a>")
+            else:
+                report_lines.append(f"{icon} {m.stream_title}")
+
+        if op_keys_file:
+            report_lines.append(f"\nФайл ключей:\n<code>{os.path.basename(op_keys_file)}</code>")
+
+        report_text = "\n".join(report_lines)
+
+        # Формируем персональную кнопку WebApp калькулятора ТОЛЬКО для матчей этого оператора
+        calc_matches = [it["match"] for it in op_items if it.get("success")] or [it["match"] for it in op_items]
+        calc_url = build_calculator_url(webapp_url, friday_date, sunday_date, calc_matches)
+        reply_markup = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": f"Мой расчет оплаты ({len(calc_matches)} игр)",
+                        "web_app": {"url": calc_url}
+                    }
+                ]
+            ]
+        }
+
+        # Отправляем сообщение
+        msg_ok = notifier.send_message(report_text, chat_id=cid, reply_markup=reply_markup)
+        if msg_ok:
+            sent_count += 1
+            logger.info(f"Персональный отчет отправлен оператору '{op_name}' (чат {cid}): {op_success}/{op_total} матчей.")
+
+        # Отправляем персональный файл ключей
+        if tg_send_file and op_keys_file and os.path.exists(op_keys_file):
+            caption = f"Ключи трансляций: {op_name} ({datetime.datetime.now().strftime('%d.%m.%Y')})"
+            notifier.send_document(op_keys_file, caption=caption, chat_id=cid)
+
+    return sent_count
 
 
 def send_custom_period_report(
@@ -722,13 +898,27 @@ async def run_autopilot_check(test_mode: bool = False, force_all: bool = False) 
     if new_matches:
         logger.info(f"Найдено {len(new_matches)} новых матчей. Начинаем создание трансляций...")
 
-        if notifier.is_configured() and target_chat_ids:
-            for cid in target_chat_ids:
-                notifier.send_message(
-                    f"<b>GOAL Автопилот:</b> Обнаружено новых матчей: <b>{len(new_matches)}</b>.\n"
-                    f"Запускаю создание трансляций и генерацию обложек...",
-                    chat_id=cid
-                )
+        if notifier.is_configured():
+            if operators:
+                for op in operators:
+                    cid = str(op.get("chat_id", "")).strip()
+                    if not cid:
+                        continue
+                    op_name = op.get("name", "Оператор")
+                    op_m = [m for m in new_matches if m.operator_chat_id == cid or m.operator_name == op_name]
+                    if op_m:
+                        notifier.send_message(
+                            f"<b>GOAL Автопилот:</b> Обнаружено ваших новых матчей: <b>{len(op_m)}</b> ({op_name}).\n"
+                            f"Запускаю создание трансляций и генерацию обложек...",
+                            chat_id=cid
+                        )
+            elif target_chat_ids:
+                for cid in target_chat_ids:
+                    notifier.send_message(
+                        f"<b>GOAL Автопилот:</b> Обнаружено новых матчей: <b>{len(new_matches)}</b>.\n"
+                        f"Запускаю создание трансляций и генерацию обложек...",
+                        chat_id=cid
+                    )
 
         success_count, keys_file, results = await process_selected_matches(
             selected_matches=new_matches,
@@ -745,46 +935,18 @@ async def run_autopilot_check(test_mode: bool = False, force_all: bool = False) 
         # Запись созданных матчей в локальную базу
         record_processed_matches(results, db)
 
-        # Отчет в Telegram
-        report_lines = [
-            "<b>GOAL: Трансляции успешно созданы</b>",
-            f"Период: <b>{dates_display}</b> ({month_name}, Выходные #{week_num})",
-            f"Создано: <b>{success_count}</b> из <b>{len(new_matches)}</b> матчей\n",
-            "<b>Матчи:</b>"
-        ]
-        for item in results:
-            m: MatchMetadata = item["match"]
-            v_url = item.get("video_url")
-            icon = "[OK]" if item.get("success") else "[ERR]"
-            if v_url:
-                report_lines.append(f"{icon} <a href='{v_url}'>{m.stream_title}</a>")
-            else:
-                report_lines.append(f"{icon} {m.stream_title}")
-
-        if keys_file:
-            report_lines.append(f"\nФайл ключей сохранен на ПК:\n<code>{os.path.abspath(keys_file)}</code>")
-        report_text = "\n".join(report_lines)
-
-        # Формируем кнопку WebApp для персонального расчета оплаты
-        calc_matches = [item["match"] for item in results if item.get("success")] or new_matches
-        calc_url = build_calculator_url(webapp_url, friday_date, sunday_date, calc_matches)
-        reply_markup = {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "Мой расчет оплаты",
-                        "web_app": {"url": calc_url}
-                    }
-                ]
-            ]
-        }
-
-        if notifier.is_configured() and target_chat_ids:
-            for cid in target_chat_ids:
-                notifier.send_message(report_text, chat_id=cid, reply_markup=reply_markup)
-                if tg_send_file and keys_file and os.path.exists(keys_file):
-                    caption = f"Ключи трансляций ({datetime.datetime.now().strftime('%d.%m.%Y')})"
-                    notifier.send_document(keys_file, caption=caption, chat_id=cid)
+        # Персональная рассылка отчетов и ключей каждому оператору в Telegram
+        send_operator_dispatch(
+            results=results,
+            master_keys_file=keys_file,
+            config=config,
+            dates_display=dates_display,
+            week_num=week_num,
+            month_name=month_name,
+            friday_date=friday_date,
+            sunday_date=sunday_date,
+            notifier=notifier
+        )
     else:
         logger.info(f"Все матчи ({len(all_matches)} шт.) уже имеют готовые трансляции. Новых игр нет.")
 
@@ -819,27 +981,56 @@ async def run_autopilot_check(test_mode: bool = False, force_all: bool = False) 
         days_str = ", ".join(sorted_days)
         logger.info(f"Выходные #{week_num} ({month_name}, {dates_display}) полностью укомплектованы ({days_str}, матчей: {len(weekend_matches)}). Все дальнейшие проверки на этих выходных отключены.")
 
-        if notifier.is_configured() and target_chat_ids:
-            close_calc_url = build_calculator_url(webapp_url, friday_date, sunday_date, weekend_matches)
-            close_markup = {
-                "inline_keyboard": [
-                    [
-                        {
-                            "text": "Мой расчет оплаты",
-                            "web_app": {"url": close_calc_url}
+        if notifier.is_configured():
+            if operators:
+                for op in operators:
+                    cid = str(op.get("chat_id", "")).strip()
+                    if not cid:
+                        continue
+                    op_name = op.get("name", "Оператор")
+                    op_m = [m for m in weekend_matches if m.operator_chat_id == cid or m.operator_name == op_name]
+                    if op_m:
+                        close_calc_url = build_calculator_url(webapp_url, friday_date, sunday_date, op_m)
+                        close_markup = {
+                            "inline_keyboard": [
+                                [
+                                    {
+                                        "text": f"Мой расчет оплаты ({len(op_m)} игр)",
+                                        "web_app": {"url": close_calc_url}
+                                    }
+                                ]
+                            ]
                         }
+                        notifier.send_message(
+                            f"<b>GOAL Автопилот: Выходные закрыты.</b>\n"
+                            f"Оператор: <b>{op_name}</b>\n"
+                            f"Период: <b>{dates_display}</b> ({month_name}, Выходные #{week_num})\n"
+                            f"Всего ваших матчей: <b>{len(op_m)}</b> (дни: {days_str})\n\n"
+                            f"Все ваши трансляции готовы. Проверки на эти выходные завершены. Ожидание следующего цикла.",
+                            chat_id=cid,
+                            reply_markup=close_markup
+                        )
+            elif target_chat_ids:
+                close_calc_url = build_calculator_url(webapp_url, friday_date, sunday_date, weekend_matches)
+                close_markup = {
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "Мой расчет оплаты",
+                                "web_app": {"url": close_calc_url}
+                            }
+                        ]
                     ]
-                ]
-            }
-            for cid in target_chat_ids:
-                notifier.send_message(
-                    f"<b>GOAL Автопилот: Выходные закрыты.</b>\n"
-                    f"Период: <b>{dates_display}</b> ({month_name}, Выходные #{week_num})\n"
-                    f"Всего матчей: <b>{len(weekend_matches)}</b> (дни: {days_str})\n\n"
-                    f"Все трансляции готовы. Проверки на эти выходные завершены. Ожидание следующего цикла.",
-                    chat_id=cid,
-                    reply_markup=close_markup
-                )
+                }
+                for cid in target_chat_ids:
+                    notifier.send_message(
+                        f"<b>GOAL Автопилот: Выходные закрыты.</b>\n"
+                        f"Период: <b>{dates_display}</b> ({month_name}, Выходные #{week_num})\n"
+                        f"Всего матчей: <b>{len(weekend_matches)}</b> (дни: {days_str})\n\n"
+                        f"Все трансляции готовы. Проверки на эти выходные завершены. Ожидание следующего цикла.",
+                        chat_id=cid,
+                        reply_markup=close_markup
+                    )
 
     logger.info("Проверка расписания завершена.")
     return {
