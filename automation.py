@@ -228,7 +228,10 @@ def launch_chrome():
         "https://studio.rutube.ru/streams"
     ]
     logger.info(f"Запуск Chrome (порт 9222, профиль: '{profile_path}')...")
-    return subprocess.Popen(cmd)
+    kwargs = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    return subprocess.Popen(cmd, **kwargs)
 
 
 async def ensure_chrome_running(max_wait: int = 15) -> Tuple[bool, bool]:
@@ -816,7 +819,7 @@ async def run_autopilot_check(test_mode: bool = False, force_all: bool = False) 
         days_str = ", ".join(sorted_days)
         logger.info(f"Выходные #{week_num} ({month_name}, {dates_display}) полностью укомплектованы ({days_str}, матчей: {len(weekend_matches)}). Все дальнейшие проверки на этих выходных отключены.")
 
-        if notifier.is_configured() and chat_id:
+        if notifier.is_configured() and target_chat_ids:
             close_calc_url = build_calculator_url(webapp_url, friday_date, sunday_date, weekend_matches)
             close_markup = {
                 "inline_keyboard": [
@@ -828,13 +831,15 @@ async def run_autopilot_check(test_mode: bool = False, force_all: bool = False) 
                     ]
                 ]
             }
-            notifier.send_message(
-                f"<b>GOAL Автопилот: Выходные закрыты.</b>\n"
-                f"Период: <b>{dates_display}</b> ({month_name}, Выходные #{week_num})\n"
-                f"Всего матчей: <b>{len(weekend_matches)}</b> (дни: {days_str})\n\n"
-                f"Все трансляции готовы. Проверки на эти выходные завершены. Ожидание следующего цикла.",
-                reply_markup=close_markup
-            )
+            for cid in target_chat_ids:
+                notifier.send_message(
+                    f"<b>GOAL Автопилот: Выходные закрыты.</b>\n"
+                    f"Период: <b>{dates_display}</b> ({month_name}, Выходные #{week_num})\n"
+                    f"Всего матчей: <b>{len(weekend_matches)}</b> (дни: {days_str})\n\n"
+                    f"Все трансляции готовы. Проверки на эти выходные завершены. Ожидание следующего цикла.",
+                    chat_id=cid,
+                    reply_markup=close_markup
+                )
 
     logger.info("Проверка расписания завершена.")
     return {
