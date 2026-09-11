@@ -7,6 +7,12 @@ import asyncio
 import argparse
 import datetime
 
+# Гарантируем, что рабочий каталог всегда указывает на корень проекта GOAL
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(PROJECT_DIR)
+if PROJECT_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_DIR)
+
 # Добавляем пути и кодировку для корректной работы в консоли Windows
 if sys.platform == "win32":
     try:

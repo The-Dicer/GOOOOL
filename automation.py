@@ -1,5 +1,12 @@
 import os
 import sys
+
+# Гарантируем, что рабочий каталог всегда указывает на корень проекта GOAL
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(PROJECT_DIR)
+if PROJECT_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_DIR)
+
 import json
 import time
 import base64
