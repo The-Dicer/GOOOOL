@@ -114,7 +114,7 @@ class AFLPublisherApp(ctk.CTk):
 
         # Настройки папки ключей и Telegram
         self.stream_keys_dir_var = ctk.StringVar(value="stream_keys")
-        self.tg_bot_token_var = ctk.StringVar(value="8780587668:AAEm_d4JqgggAySYl9g7GsNCdItsWpe7wPA")
+        self.tg_bot_token_var = ctk.StringVar(value="")
         self.tg_chat_id_var = ctk.StringVar(value="")
         self.tg_send_file_var = ctk.BooleanVar(value=True)
         self.rutube_channel_id_var = ctk.StringVar(value="77095292")
@@ -164,7 +164,7 @@ class AFLPublisherApp(ctk.CTk):
 
             # Telegram
             tg = config.get("telegram", {})
-            self.tg_bot_token_var.set(tg.get("bot_token", "8780587668:AAEm_d4JqgggAySYl9g7GsNCdItsWpe7wPA"))
+            self.tg_bot_token_var.set(tg.get("bot_token", ""))
             self.tg_chat_id_var.set(tg.get("chat_id", ""))
             self.tg_send_file_var.set(tg.get("send_file", True))
 
